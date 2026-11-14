@@ -8,6 +8,66 @@ struct RootView: View {
     }
 }
 
+/// The one surface treatment used by every card and button.
+///
+/// iOS 26 and later: Liquid Glass (`glassEffect`), tinted yellow for the primary action, interactive for anything tappable.
+/// Earlier iOS, or when the user has turned on Reduce Transparency or Increase Contrast: the original solid, outlined
+/// surface. A person who needs maximum contrast always gets it; glass is never allowed to cost legibility.
+struct Surface: ViewModifier {
+    var prominent = false
+    var interactive = true
+    var cornerRadius: CGFloat = 18
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), !reduceTransparency, contrast != .increased {
+            content.glassEffect(prominent ? Glass.regular.tint(.yellow).interactive(interactive)
+                                          : Glass.regular.interactive(interactive),
+                                in: .rect(cornerRadius: cornerRadius))
+        } else {
+            let shape = RoundedRectangle(cornerRadius: cornerRadius)
+            content
+                .background(prominent ? Color.yellow : Color(white: contrast == .increased ? 0.0 : 0.16), in: shape)
+                .overlay(shape.stroke(Color.white, lineWidth: prominent ? 0 : (contrast == .increased ? 3 : 2)))
+        }
+    }
+}
+
+extension View {
+    func surface(prominent: Bool = false, interactive: Bool = true, cornerRadius: CGFloat = 18) -> some View {
+        modifier(Surface(prominent: prominent, interactive: interactive, cornerRadius: cornerRadius))
+    }
+
+    /// Groups neighbouring glass surfaces so they render and blend as one system. No-op before iOS 26.
+    @ViewBuilder func glassGroup(spacing: CGFloat) -> some View {
+        if #available(iOS 26, *) { GlassEffectContainer(spacing: spacing) { self } } else { self }
+    }
+}
+
+/// Screen background. Glass needs something behind it to refract, so this is a very dark gradient with two soft
+/// glows instead of flat black. It stays dark enough that white text keeps its contrast, and it is flat black
+/// when the user asks for less transparency or more contrast.
+struct Backdrop: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        if reduceTransparency || contrast == .increased {
+            Color.black.ignoresSafeArea()
+        } else {
+            ZStack {
+                LinearGradient(colors: [Color(red: 0.05, green: 0.07, blue: 0.12), .black], startPoint: .top, endPoint: .bottom)
+                RadialGradient(colors: [Color.yellow.opacity(0.16), .clear], center: .topTrailing, startRadius: 0, endRadius: 420)
+                RadialGradient(colors: [Color.blue.opacity(0.22), .clear], center: .bottomLeading, startRadius: 0, endRadius: 460)
+            }
+            .ignoresSafeArea()
+            .accessibilityHidden(true)
+        }
+    }
+}
+
 /// Large, high-contrast, label-first button used everywhere.
 ///
 /// Sighted and low-vision users read the full `title`, which always states the current state in words (never colour alone).
@@ -21,26 +81,25 @@ struct BigButton: View {
     var spokenValue: String?
     var hint: String?
     var isToggle = false
+    var compact = false          // half-width buttons: smaller type so one word is never hyphenated
     let action: () -> Void
 
-    @ScaledMetric(relativeTo: .title2) private var regularHeight: CGFloat = 76
-    @ScaledMetric(relativeTo: .title2) private var prominentHeight: CGFloat = 120
-    @Environment(\.colorSchemeContrast) private var contrast
+    // Minimum heights. On the fixed main screen the buttons share whatever height is left, so they are usually taller.
+    @ScaledMetric(relativeTo: .title2) private var regularHeight: CGFloat = 56
+    @ScaledMetric(relativeTo: .title2) private var prominentHeight: CGFloat = 84
 
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.title2.weight(.bold))
+                .font(compact ? .headline.weight(.bold) : .title2.weight(.bold))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, minHeight: prominent ? prominentHeight : regularHeight)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: prominent ? prominentHeight : regularHeight, maxHeight: .infinity)
                 .foregroundStyle(prominent ? Color.black : Color.white)
-                .background(prominent ? Color.yellow : Color(white: contrast == .increased ? 0.0 : 0.16),
-                            in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white, lineWidth: prominent ? 0 : (contrast == .increased ? 3 : 2)))
                 .contentShape(RoundedRectangle(cornerRadius: 18))
+                .surface(prominent: prominent)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(spokenLabel ?? title)
@@ -84,7 +143,7 @@ struct OnboardingView: View {
             .font(.title3)
             .padding(24)
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(Backdrop())
         .foregroundStyle(.white)
         .onAppear { titleFocused = true }
     }
@@ -98,9 +157,30 @@ struct MainView: View {
     @State private var showDiagnostics = false
 
     var body: some View {
-        // Scrolls, so nothing is cut off at the largest accessibility text sizes.
-        ScrollView {
-            VStack(spacing: 14) {
+        // One fixed screen: every control stays in the same place, so it can be found by position and by habit.
+        // Only when the text is set so large that the controls cannot fit does the same column become scrollable.
+        ViewThatFits(in: .vertical) {
+            controls
+            ScrollView { controls }
+        }
+        .background(Backdrop())
+        .foregroundStyle(.white)
+        // VoiceOver's Magic Tap (two-finger double tap) is the conventional "main action" gesture: here, silence or resume.
+        .accessibilityAction(.magicTap) { model.togglePause() }
+        .alert(model.tr("Share observations?", "Condividere le osservazioni?"), isPresented: $askConsent) {
+            Button(model.tr("Share", "Condividi")) { model.setCollaboration(true) }
+            Button(model.tr("Cancel", "Annulla"), role: .cancel) {}
+        } message: {
+            Text(model.tr(
+                "Your phone will exchange obstacle observations with nearby Shared Sight devices that use session code \(model.sessionCode): object type, time and, when measured, position. No video, no photos, no face recognition. You can stop at any time.",
+                "Il telefono scambierà osservazioni sugli ostacoli con i dispositivi Shared Sight vicini che usano il codice sessione \(model.sessionCode): tipo di oggetto, orario e, se misurata, posizione. Nessun video, nessuna foto, nessun riconoscimento facciale. Puoi interrompere in qualsiasi momento."))
+        }
+        .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
+        .sheet(isPresented: $showDiagnostics) { DiagnosticsView().environmentObject(model) }
+    }
+
+    private var controls: some View {
+            VStack(spacing: 12) {
                 status
 
                 BigButton(title: model.tr("What is around me?", "Cosa c'è intorno a me?"), systemImage: "eye.fill", prominent: true,
@@ -143,52 +223,46 @@ struct MainView: View {
 
                 // Side by side at ordinary sizes, stacked when the text is large enough that two columns would wrap badly.
                 let secondary = Group {
-                    BigButton(title: model.tr("Settings", "Impostazioni"), systemImage: "gearshape") { showSettings = true }
+                    BigButton(title: model.tr("Settings", "Impostazioni"), systemImage: "gearshape", compact: !typeSize.isAccessibilitySize) { showSettings = true }
                     BigButton(title: model.tr("Diagnostics", "Diagnostica"), systemImage: "waveform.path.ecg",
-                              hint: model.tr("Technical screen for engineers.", "Schermata tecnica per gli sviluppatori.")) { showDiagnostics = true }
+                              hint: model.tr("Technical screen for engineers.", "Schermata tecnica per gli sviluppatori."),
+                              compact: !typeSize.isAccessibilitySize) { showDiagnostics = true }
                 }
-                if typeSize.isAccessibilitySize { VStack(spacing: 14) { secondary } } else { HStack(spacing: 12) { secondary } }
+                if typeSize.isAccessibilitySize { VStack(spacing: 12) { secondary } } else { HStack(spacing: 12) { secondary } }
             }
-            .padding(18)
-        }
-        .background(Color.black.ignoresSafeArea())
-        .foregroundStyle(.white)
-        // VoiceOver's Magic Tap (two-finger double tap) is the conventional "main action" gesture: here, silence or resume.
-        .accessibilityAction(.magicTap) { model.togglePause() }
-        .alert(model.tr("Share observations?", "Condividere le osservazioni?"), isPresented: $askConsent) {
-            Button(model.tr("Share", "Condividi")) { model.setCollaboration(true) }
-            Button(model.tr("Cancel", "Annulla"), role: .cancel) {}
-        } message: {
-            Text(model.tr(
-                "Your phone will exchange obstacle observations with nearby Shared Sight devices that use session code \(model.sessionCode): object type, time and, when measured, position. No video, no photos, no face recognition. You can stop at any time.",
-                "Il telefono scambierà osservazioni sugli ostacoli con i dispositivi Shared Sight vicini che usano il codice sessione \(model.sessionCode): tipo di oggetto, orario e, se misurata, posizione. Nessun video, nessuna foto, nessun riconoscimento facciale. Puoi interrompere in qualsiasi momento."))
-        }
-        .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
-        .sheet(isPresented: $showDiagnostics) { DiagnosticsView().environmentObject(model) }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .glassGroup(spacing: 12)
     }
 
     /// Three separate, individually focusable lines. Each one states its meaning in words; the icon only repeats it.
     private var status: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(model.tr("Status", "Stato")).font(.headline).accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 8) {
             Label(model.perceptionStatusText, systemImage: perceptionIcon)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(perceptionOK ? Color.white : Color.yellow)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(model.tr("Camera", "Fotocamera"))
                 .accessibilityValue(model.perceptionStatusText)
             Label(model.collaborationStatusText, systemImage: "person.2.wave.2")
                 .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(model.tr("Other devices", "Altri dispositivi"))
                 .accessibilityValue(model.collaborationStatusText)
             if !model.snapshot.lastSpoken.isEmpty {
                 Text(model.tr("Last announcement: ", "Ultimo annuncio: ") + model.snapshot.lastSpoken)
                     .font(.body)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.updatesFrequently)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .surface(interactive: false, cornerRadius: 22)
+        .layoutPriority(1)   // the status keeps its full height; the buttons absorb any shortage   // a read-only card: glass, but it does not react to touch
     }
 
     private func onOff(_ on: Bool) -> String { on ? model.tr("On", "Attivo") : model.tr("Off", "Disattivato") }

@@ -1,3 +1,18 @@
+# UPDATE — Liquid Glass and single-screen layout on `main` (14 Nov 2026, night)
+
+- Every card and button uses Liquid Glass (`glassEffect`, grouped in a `GlassEffectContainer`) on iOS 26 and later; the primary action
+  is yellow-tinted glass. One modifier, `Surface`, in `SharedSightApp/UI/RootView.swift`.
+- Fallback to the original solid, outlined surfaces and a flat black background on iOS 17–18, and whenever the user has turned on
+  Reduce Transparency or Increase Contrast.
+- The main screen is one fixed screen (no scrolling), so controls keep their position. It becomes scrollable only if the text size is
+  set so large that the controls cannot fit.
+- Checked: simulator build succeeds; the app was launched in the iPhone 17 simulator (iOS 27.2) and the onboarding and main screens
+  were looked at (`Docs/main-screen.png`). The Simulator has no camera, so the status correctly reads "camera unavailable".
+- Not checked: a real iPhone, VoiceOver, other screen sizes, large text sizes, the Reduce Transparency / Increase Contrast fallbacks,
+  Settings and Diagnostics sheets, iOS 17–18.
+
+---
+
 # UPDATE — branch `accessibility-hig` (14 Nov 2026, late evening)
 
 ## What was checked on this branch
