@@ -41,3 +41,57 @@ Each module was designed after checking the current literature. What was adopted
   core needs; chest-worn phone; sensor fusion; personalised audio. → sparse, prioritised, de-duplicated announcements; verbosity setting;
   IMU fused with vision; audio mixed with (not replacing) environmental sound.
 - arXiv:2504.20976 (monocular-depth guidance), NaviSense arXiv:2509.18672 (LiDAR + audio-haptic): support optional haptics and capability gating by sensor.
+
+---
+
+# Need, existing products and what Shared Sight adds (checked 14 Nov 2026)
+
+Figures below come from search summaries of the cited sources, not from reading each source in full. Verify a number against
+its source before it goes on a slide.
+
+## Size of the need
+| Fact | Number | Source |
+|---|---|---|
+| People with some vision impairment worldwide | at least 2.2 billion | WHO fact sheet |
+| People who are blind (2020) | 43 million | IAPB Vision Atlas / Lancet Global Health |
+| People with moderate to severe vision loss (2020) | 295 million | IAPB Vision Atlas |
+| Blind people projected for 2050 | 61 million | Statista summary of the same study |
+| Blind people in Italy (2020) | about 510,000 | IAPB Vision Atlas |
+
+## Accidents while walking (Manduchi & Kurniawan, UC Santa Cruz, 2010, about 300 blind or legally blind respondents)
+- 13% had a head-level accident at least once a month; 7% fell at least once a month.
+- 23% of head injuries needed medical attention.
+- A guide dog did not protect better than a long cane against these accidents.
+
+## Platform
+- WebAIM Screen Reader Survey #10 (2024): 91% of screen reader users use one on a phone; about 71% use VoiceOver.
+  → iPhone first, and the app must be fully usable with VoiceOver.
+
+## What already exists
+- **Apple, built in and free:** VoiceOver Live Recognition (speaks scenes, people, doors, furniture, text from the camera);
+  Detection Mode in Magnifier (distance to people, doors, furniture; needs LiDAR, so Pro iPhones); from May 2026, asking spoken
+  questions about the camera view (needs Apple Intelligence).
+- **Apps:** Microsoft Seeing AI, Google Lookout (Android), several LiDAR obstacle-distance apps.
+- **Research:** Mobilio (already cited above): phone plus cane cut indoor obstacle contacts by about 41% with 14 participants.
+- **Abandonment:** about 30% of assistive devices in general are abandoned within a year; reasons given are cost, lack of training
+  and poor fit with real needs. No electronic aid has replaced the cane.
+
+→ One phone that sees an obstacle and speaks is not a differentiator. Apple ships it.
+
+## What none of the above does (found in this search)
+1. Use what **another** camera sees. Each product knows only its own field of view.
+2. Keep a short memory of an object that left the frame, labelled as not confirmed.
+3. Say out loud when it **cannot** see.
+
+These three are Shared Sight's reason to exist, and they drive the interface decisions below.
+
+## Interface decisions that follow from the research
+| Finding | Decision in the app |
+|---|---|
+| Users already rely on VoiceOver | Every control has a short label, a separate value and a hint; state toggles read as switches; alerts use the user's VoiceOver voice and speed when VoiceOver is on |
+| Apple describes on request; a mobility aid must also warn | Both: automatic alerts, plus a "What is around me?" button that summarises on demand |
+| One hand holds the cane | Magic Tap (two-finger double tap) pauses or resumes without finding a button; onboarding suggests wearing the phone on the chest |
+| Abandonment follows poor fit and lack of training | Onboarding states limits in plain words; speaking speed and detail level are adjustable; a "Repeat last announcement" button |
+| Low vision is far more common than blindness | Full Dynamic Type support (screen scrolls, buttons grow, columns stack), high contrast, Increase Contrast honoured, state always in words |
+| Silent failure is the dangerous failure | Camera and link failures are announced through VoiceOver even when the app's own speech is off |
+| Never imply safety | The on-demand summary of an empty scene ends with "This does not mean the way is clear" (unit-tested) |

@@ -1,3 +1,34 @@
+# UPDATE — branch `accessibility-hig` (14 Nov 2026, late evening)
+
+## What was checked on this branch
+- `swift test` in `SharedSightCore` on a Mac: **43 tests, 0 failures** (the 33 original tests plus 10 new ones).
+- `xcodebuild` for the iOS Simulator (Debug, no signing): **BUILD SUCCEEDED**. This is the first time the app has been compiled.
+- Not done: the app has not been launched, in the Simulator or on an iPhone. No screen has been looked at, VoiceOver has not been
+  run against it, and no speech has been heard. Everything under "TESTED ON REAL IPHONE" below is still "Nothing".
+
+## What changed (accessibility and Human Interface Guidelines pass, driven by RESEARCH.md "Need, existing products…")
+- **"What is around me?"** button: on-demand spoken summary in three separate groups (in view now / seen a moment ago, not confirmed /
+  reported by another device, with or without verified position). Empty scene ends with "This does not mean the way is clear".
+  Logic in `SharedSightCore/SurroundingsSummary.swift`, 10 unit tests.
+- **"Repeat last announcement"** button.
+- **VoiceOver:** short label + separate value + hint on every control; state buttons carry the toggle trait; status is three separately
+  focusable lines; Magic Tap (two-finger double tap) pauses or resumes; first-launch focus lands on the title; link changes are announced
+  through VoiceOver when the app's own speech is off; answers to direct requests go through VoiceOver so they do not talk over it.
+- **Speech:** adjustable speaking speed with a test button; when VoiceOver is on, alerts use the user's VoiceOver voice and speed
+  (`prefersAssistiveTechnologySettings`).
+- **Dynamic Type / low vision:** main screen scrolls, button heights scale, text wraps, the two secondary buttons stack at accessibility
+  sizes, Increase Contrast is honoured.
+- **Settings:** number pad can be closed (keyboard toolbar button); stepper and slider read a proper value.
+- **Haptics:** generators are reused and prepared; the three patterns are explained in Settings.
+
+## Needs a person with an iPhone (cannot be verified from a Mac)
+1. VoiceOver pass over every screen: reading order, labels, Magic Tap, the consent alert, the keyboard button.
+2. Whether app speech and VoiceOver speech overlap in practice, and whether the VoiceOver-voice setting sounds right.
+3. Largest Dynamic Type size on a small iPhone: nothing clipped.
+4. Everything already listed under EXPERIMENTAL and REMAINING BLOCKERS below.
+
+---
+
 # STATUS — Shared Sight (written 14 Nov 2026, evening) — HANDOFF NOTES FOR THE NEXT AGENT / ENGINEER
 
 ## Honest headline

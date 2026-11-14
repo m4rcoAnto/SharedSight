@@ -14,6 +14,8 @@ final class AppModel: ObservableObject {
     @Published var haptics: Bool { didSet { defaults.set(haptics, forKey: "haptics"); engine.audio.hapticsEnabled = haptics } }
     @Published var language: SpeechLanguage { didSet { defaults.set(language.rawValue, forKey: "language"); engine.audio.language = language } }
     @Published var verbosity: Verbosity { didSet { defaults.set(verbosity.rawValue, forKey: "verbosity"); pushPreferences() } }
+    /// Multiplier on the system default speech rate (0.8 ... 1.6). VoiceOver users get their own VoiceOver rate instead.
+    @Published var speechRate: Double { didSet { defaults.set(speechRate, forKey: "speechRate"); engine.audio.rateMultiplier = Float(speechRate) } }
     @Published var spatialMode = false { didSet { engine.setSpatialMode(spatialMode) } }
     @Published var sessionCode: String { didSet { defaults.set(sessionCode, forKey: "sessionCode") } }
     @Published var markerWidthCm: Double { didSet { defaults.set(markerWidthCm, forKey: "markerWidthCm") } }
@@ -24,6 +26,7 @@ final class AppModel: ObservableObject {
     private var started = false
     private var pausedByBackground = false
     private var lastSemanticState: ReliabilityState?
+    private var lastLinkState: PeerLinkState?
 
     init() {
         let d = UserDefaults.standard
@@ -33,6 +36,8 @@ final class AppModel: ObservableObject {
         let preferredItalian = Locale.preferredLanguages.first?.hasPrefix("it") ?? false
         language = SpeechLanguage(rawValue: d.string(forKey: "language") ?? "") ?? (preferredItalian ? .italian : .english)
         verbosity = Verbosity(rawValue: d.string(forKey: "verbosity") ?? "") ?? .normal
+        let rate = d.double(forKey: "speechRate")
+        speechRate = rate > 0 ? min(max(rate, 0.8), 1.6) : 1.12
         sessionCode = d.string(forKey: "sessionCode") ?? "1234"
         let width = d.double(forKey: "markerWidthCm")
         markerWidthCm = width > 0 ? width : 15
@@ -48,6 +53,7 @@ final class AppModel: ObservableObject {
         engine.audio.language = language
         engine.audio.muted = !audioOn
         engine.audio.hapticsEnabled = haptics
+        engine.audio.rateMultiplier = Float(speechRate)
         pushPreferences()
         engine.onSnapshot = { [weak self] s in self?.receive(s) }
         engine.start()
@@ -68,11 +74,57 @@ final class AppModel: ObservableObject {
             UIAccessibility.post(notification: .announcement, argument: perceptionStatusText)
         }
         lastSemanticState = state
+        // Same for the link to the other device: connecting and, above all, losing it must never be silent.
+        if s.linkState != lastLinkState, lastLinkState != nil, !audioOn, UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: collaborationStatusText)
+        }
+        lastLinkState = s.linkState
+    }
+
+    // MARK: Things the user asks for directly
+
+    /// Answers a direct request. With VoiceOver running the text goes through VoiceOver, so it never talks over
+    /// VoiceOver reading the button that was just activated; otherwise the app's own voice speaks it.
+    private func answer(_ text: String) {
+        if UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: text)
+        } else {
+            engine.audio.sayRequested(text)
+        }
+    }
+
+    /// Text of the on-demand summary, built only from the current snapshot.
+    var surroundingsText: String {
+        let local = snapshot.entries.filter { $0.track.confirmed }.map { e in
+            SurroundingsItem(label: e.track.label, state: e.state, sector: snapshot.relevance[e.id]?.sector,
+                             distance: snapshot.relevance[e.id]?.distance)
+        }
+        let peers = snapshot.peers.map {
+            PeerSurroundingsItem(label: $0.observation.label, status: $0.status, sector: $0.sector, distance: $0.distance)
+        }
+        let state: ReliabilityState = paused ? .unavailable : snapshot.reliability.status(.semanticDetection).state
+        if paused { return tr("Perception is paused. I cannot tell what is around you.", "La percezione è in pausa. Non posso dirti cosa c'è intorno a te.") }
+        return AlertPhraseBuilder(language: language).surroundings(perception: state, local: local, peers: peers)
+    }
+
+    func describeSurroundings() { answer(surroundingsText) }
+
+    func repeatLastAnnouncement() {
+        answer(snapshot.lastSpoken.isEmpty ? tr("Nothing has been announced yet.", "Nessun annuncio finora.") : snapshot.lastSpoken)
+    }
+
+    func testVoice() {
+        engine.audio.sayRequested(tr("This is how fast Shared Sight speaks.", "Questa è la velocità con cui parla Shared Sight."))
     }
 
     func togglePause() {
         paused.toggle()
         engine.setPaused(paused)
+        // Confirm the change when the app's own voice is off, so a Magic Tap is never left unanswered.
+        if !audioOn, UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement,
+                                 argument: paused ? tr("Perception paused.", "Percezione in pausa.") : tr("Perception resumed.", "Percezione ripresa."))
+        }
     }
 
     func setCollaboration(_ on: Bool) {
