@@ -33,6 +33,15 @@ orientation-and-mobility practice, and it never says that a path is clear.**
 
 Checks from Terminal: `./Scripts/verify.sh` (unit tests on the Mac + simulator compile check; logs in `Logs/`).
 
+## Using it without sight
+
+- Works with VoiceOver: every control has a label, a value and a hint.
+- **Two-finger double tap** anywhere on the main screen pauses or resumes (VoiceOver Magic Tap).
+- **What is around me?** speaks what is in view now, what was seen a moment ago, and what another device reported.
+- **Repeat last announcement** says the last alert again.
+- Speaking speed and detail level are in Settings. With VoiceOver on, alerts use your VoiceOver voice and speed.
+- If the camera is covered or it is too dark, the app says so. It never says a path is clear.
+
 ## Two-phone demo (controlled, supervised setting only)
 
 1. Print `Docs/AnchorMarker.png`, measure its printed width, enter it in Settings on both phones, lay it flat on the floor.

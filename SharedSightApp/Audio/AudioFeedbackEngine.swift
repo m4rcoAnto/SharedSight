@@ -23,10 +23,30 @@ final class AudioFeedbackEngine: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var lastSpoken = ""
     var onSpoken: ((String) -> Void)?
     var maxPendingAge = 2.0
+    /// Multiplier on the system default speech rate, set by the user (0.8 ... 1.6).
+    /// Ignored while VoiceOver is running: then the utterance follows the user's own VoiceOver voice and rate.
+    var rateMultiplier: Float = 1.12
+
+    // Generators are kept and prepared so the tap arrives with the first syllable, not after it.
+    private let notificationHaptic = UINotificationFeedbackGenerator()
+    private let heavyHaptic = UIImpactFeedbackGenerator(style: .heavy)
+    private let mediumHaptic = UIImpactFeedbackGenerator(style: .medium)
 
     override init() {
         super.init()
         synthesizer.delegate = self
+    }
+
+    /// Speaks free text the user explicitly asked for (surroundings summary, repeat, voice test).
+    /// Spoken even when alerts are muted, because it is an answer to a direct request. Low priority:
+    /// any interrupting obstacle alert cuts it off.
+    func sayRequested(_ text: String) {
+        guard sessionError == nil, !text.isEmpty else { return }
+        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+        pending = nil
+        speak(text, AlertIntent(kind: .system(.perceptionRestored), sector: nil, distance: nil, source: .localCamera,
+                                priority: 1, interrupts: false, evidenceTimestamp: CACurrentMediaTime()),
+              remember: false)
     }
 
     func prepare() {
@@ -70,22 +90,29 @@ final class AudioFeedbackEngine: NSObject, AVSpeechSynthesizerDelegate {
                             interrupts: false, evidenceTimestamp: CACurrentMediaTime())])
     }
 
-    private func speak(_ text: String, _ intent: AlertIntent) {
+    private func speak(_ text: String, _ intent: AlertIntent, remember: Bool = true) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: language.rawValue)
-        utterance.rate = min(AVSpeechUtteranceDefaultSpeechRate * 1.12, AVSpeechUtteranceMaximumSpeechRate)
+        utterance.rate = min(max(AVSpeechUtteranceDefaultSpeechRate * rateMultiplier, AVSpeechUtteranceMinimumSpeechRate),
+                             AVSpeechUtteranceMaximumSpeechRate)
+        // A VoiceOver user has already chosen a voice and a rate they can follow. Use those instead of ours.
+        utterance.prefersAssistiveTechnologySettings = UIAccessibility.isVoiceOverRunning
         current = intent
         startTimes[ObjectIdentifier(utterance)] = intent
-        lastSpoken = text
-        onSpoken?(text)
+        if remember {
+            lastSpoken = text
+            onSpoken?(text)
+        }
         synthesizer.speak(utterance)
-        guard hapticsEnabled else { return }
+        guard hapticsEnabled, remember else { return }
+        // Three distinct patterns: failure, own camera straight ahead, another device.
         switch intent.kind {
-        case .system(.perceptionUnavailable): UINotificationFeedbackGenerator().notificationOccurred(.error)
-        case .obstacle where intent.sector == .ahead: UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        case .peerObstacle: UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .system(.perceptionUnavailable): notificationHaptic.notificationOccurred(.error)
+        case .obstacle where intent.sector == .ahead: heavyHaptic.impactOccurred()
+        case .peerObstacle: mediumHaptic.impactOccurred()
         default: break
         }
+        notificationHaptic.prepare(); heavyHaptic.prepare(); mediumHaptic.prepare()
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {

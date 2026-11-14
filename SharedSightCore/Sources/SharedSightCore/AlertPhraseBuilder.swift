@@ -39,7 +39,7 @@ public struct AlertPhraseBuilder: Sendable {
         }
     }
 
-    private func direction(_ s: Sector?) -> String? {
+    func direction(_ s: Sector?) -> String? {
         guard let s else { return nil }
         switch (language, s) {
         case (.english, .ahead): return "ahead"
@@ -53,7 +53,7 @@ public struct AlertPhraseBuilder: Sendable {
         }
     }
 
-    private func distance(_ d: DistanceMeasurement?) -> String? {
+    func distance(_ d: DistanceMeasurement?) -> String? {
         guard let d else { return nil }
         let rounded = max(0.5, (d.meters * 2).rounded() / 2)
         let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
@@ -63,7 +63,7 @@ public struct AlertPhraseBuilder: Sendable {
         }
     }
 
-    private func capitalised(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
+    func capitalised(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
 
     public func phrase(for intent: AlertIntent) -> String {
         switch intent.kind {
