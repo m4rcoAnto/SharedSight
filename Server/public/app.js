@@ -237,7 +237,7 @@ function setupPitch(enabled, demo = true) {
   let hero = $('pitch-intro');
   if (!hero) {
     hero = document.createElement('section'); hero.id = 'pitch-intro';
-    hero.innerHTML = '<div><p class="eyebrow">FIELDVISION / SHARED SIGHT</p><h1>Più occhi.<br>Meno punti ciechi.</h1><p class="intro-copy">Un iPhone vede una parte della stanza.<br>Insieme, condividono ciò che resta fuori vista.</p></div><div class="pitch-caption"><span class="simulation-badge">DEMO SIMULATA</span><p>3 iPhone virtuali · un unico spazio condiviso</p></div>';
+    hero.innerHTML = '<div><p class="eyebrow">FIELDVISION / SHARED SIGHT</p><h1>Più occhi.<br>Meno punti ciechi.</h1><p class="intro-copy">Un iPhone vede una parte della stanza. <br>Insieme, condividono ciò che resta fuori vista.</p></div><div class="pitch-caption"><span class="simulation-badge">DEMO SIMULATA</span><p>3 iPhone virtuali · un unico spazio condiviso</p></div>';
     document.querySelector('main').before(hero);
     const panel = document.createElement('section'); panel.id = 'demo-motion';
     panel.innerHTML = '<p class="eyebrow">COSA STA SUCCEDENDO</p><h2 id="pitch-state">Osservare. Condividere. Prevedere.</h2><p id="pitch-explain"></p><div class="pitch-metrics"><div><b id="pitch-seen">—</b><span>in vista</span></div><div><b id="pitch-shared">—</b><span>condivisi</span></div><div><b id="pitch-estimated">—</b><span>stimati</span></div></div><h3>Previsione del movimento <span>3 s</span></h3><ul class="pitch-alerts"></ul><p class="pitch-limit">Stima da posizione e velocità rilevate. Ingombri approssimati; non è una garanzia di percorso libero.</p>';

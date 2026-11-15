@@ -108,3 +108,21 @@ header{position:relative}
 
 .pitch.live #connection.connected:after{content:'● Dati dal vivo'}
 #present[aria-pressed=true]{background:#242a2a;color:#fff}#present:disabled{opacity:.5;cursor:default}
+/* Presentation layout on a computer screen: one window, nothing scrolls, the room takes the space left over. */
+@media(min-width:801px){
+body.pitch{height:100vh;overflow:hidden}
+body.pitch header{padding:12px 32px 6px}
+body.pitch #pitch-intro{padding:0 32px 10px;align-items:center}
+body.pitch #pitch-intro h1,body.pitch #pitch-intro .eyebrow{display:none}
+body.pitch .intro-copy{margin:0;font-size:13px}body.pitch .intro-copy br{display:none}
+body.pitch .pitch-caption{display:flex;align-items:center;gap:12px;padding:0}body.pitch .pitch-caption p{margin:0}
+body.pitch .simulation-badge{padding:5px 10px}
+body.pitch main{flex:1 1 0;min-height:0;grid-template-rows:minmax(0,1fr);padding-bottom:0}
+body.pitch .stage{min-height:0;height:100%}
+body.pitch #viewport{height:100%;min-height:0}
+body.pitch aside{min-height:0}
+body.pitch #demo-motion{height:100%;overflow:auto;padding:20px}
+body.pitch #pitch-explain{min-height:0}
+body.pitch #pitch-guide{padding:12px 32px 2px;gap:24px}body.pitch #pitch-guide p{margin:3px 0 0;font-size:11px}
+body.pitch footer{padding:4px 32px 10px}
+}
