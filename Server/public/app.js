@@ -31,6 +31,8 @@ function setStatus(kind, detail) {
 }
 
 function start() {
+  scene.setOptions({ demo: session === 'DEMO', zones: session !== 'DEMO' });
+  setupPitch(session === 'DEMO');
   link?.close(); last = null; lastEvent = 0; previews.clear();
   $('events').replaceChildren(quiet('Quando un oggetto esce dalla vista di un iPhone ed entra in quella di un altro, compare qui.'));
   link = connect({ token, session, onStatus: setStatus, onMessage(msg) {
@@ -128,6 +130,7 @@ function renderPanels() {
     while ($('events').children.length > 12) $('events').lastChild.remove();
   }
 
+  renderDemoMotion(msg);
   renderCameras(msg);
 }
 
@@ -181,3 +184,57 @@ setInterval(() => { $('rates').textContent = last ? `${messages} agg/s · ${scen
 const params = new URLSearchParams(location.hash.slice(1));
 if (params.get('token')) { $('token').value = token = params.get('token'); $('session').value = session = params.get('session') ?? '1234'; start(); }
 window.sharedSight = { scene, get last() { return last; } };
+
+function setupPitch(enabled) {
+  document.body.classList.toggle('pitch', enabled);
+  let hero = $('pitch-intro');
+  if (!hero) {
+    hero = document.createElement('section'); hero.id = 'pitch-intro';
+    hero.innerHTML = '<div><p class="eyebrow">FIELDVISION / SHARED SIGHT</p><h1>Più occhi.<br>Meno punti ciechi.</h1><p class="intro-copy">Un iPhone vede una parte della stanza.<br>Insieme, condividono ciò che resta fuori vista.</p></div><div class="pitch-caption"><span class="simulation-badge">DEMO SIMULATA</span><p>3 iPhone virtuali · un unico spazio condiviso</p></div>';
+    document.querySelector('main').before(hero);
+    const panel = document.createElement('section'); panel.id = 'demo-motion';
+    panel.innerHTML = '<p class="eyebrow">COSA STA SUCCEDENDO</p><h2 id="pitch-state">Osservare. Condividere. Prevedere.</h2><p id="pitch-explain"></p><div class="pitch-metrics"><div><b id="pitch-seen">—</b><span>in vista</span></div><div><b id="pitch-shared">—</b><span>condivisi</span></div><div><b id="pitch-estimated">—</b><span>stimati</span></div></div><h3>Previsione del movimento <span>3 s</span></h3><ul class="pitch-alerts"></ul><p class="pitch-limit">Stima da posizione e velocità rilevate. Ingombri approssimati; non è una garanzia di percorso libero.</p>';
+    document.querySelector('aside').prepend(panel);
+    const guide = document.createElement('div'); guide.id = 'pitch-guide';
+    guide.innerHTML = '<div><b>01 <span>Rileva</span></b><p>Ogni telefono osserva il proprio campo visivo.</p></div><div><b>02 <span>Condivide</span></b><p>Un altro iPhone può vedere oltre un punto cieco.</p></div><div><b>03 <span>Prevede</span></b><p>Traiettorie stimate e possibili ostacoli, prima del contatto.</p></div>';
+    document.querySelector('main').after(guide);
+    const legend = document.createElement('div'); legend.className = 'pitch-legend';
+    legend.innerHTML = '<span><i style="background:#236fc2"></i>Traiettoria prevista</span><span><i style="background:#d64032"></i>Possibile ostacolo</span><span><i style="background:#9da6b8"></i>Sagoma trasparente: stima</span>';
+    $('viewport').append(legend);
+  }
+  hero.hidden = !enabled; $('pitch-guide').hidden = !enabled; $('demo-motion').hidden = !enabled;
+  if (enabled) {
+    document.querySelector('.brand .sub').textContent = 'Many eyes. Fewer blind spots.';
+    document.querySelector('footer').textContent = 'Prototipo sperimentale · Dati sintetici, non misure dal vivo · Le sagome rappresentano categorie di oggetti · Supporto alla consapevolezza, non dispositivo di navigazione.';
+    $('zones').setAttribute('aria-pressed', 'false');
+  }
+}
+
+function renderDemoMotion(msg) {
+  if (session !== 'DEMO') return;
+  const panel = $('demo-motion');
+  const entities = msg?.spaces.find(s => s.key === chosen)?.entities.filter(e => e.state !== 'lost') ?? [];
+  const observed = entities.filter(e => e.state === 'observed');
+  const shared = observed.filter(e => e.seenBy?.length && !e.seenBy.includes('demo-user'));
+  const hidden = entities.filter(e => e.state === 'hidden');
+  $('pitch-seen').textContent = observed.length;
+  $('pitch-shared').textContent = shared.length;
+  $('pitch-estimated').textContent = hidden.length;
+  const subject = shared.find(e => ['person','dog'].includes(e.label));
+  $('pitch-state').textContent = !msg ? 'Connessione alla demo…' : subject ? 'Fuori vista. Ancora rilevato.' : hidden.length ? 'Non più visibile. Posizione stimata.' : 'Tre prospettive, una stanza.';
+  $('pitch-explain').textContent = !msg ? 'In attesa dei dati della simulazione.' : subject ? `${Noun(subject.label)} fuori vista per l’iPhone utente, rilevato da un altro telefono. L’informazione resta disponibile nello spazio condiviso.` : hidden.length ? 'Quando nessuno vede un soggetto, la previsione resta esplicitamente una stima e viene abbandonata se troppo incerta.' : 'I rilevamenti dei tre iPhone vengono riuniti nello stesso modello spaziale, aggiornato durante il movimento.';
+  const forecasts = msg ? scene.demoForecasts ?? [] : [];
+  const ordered = [...forecasts].sort((a,b) => (a.hit?.t ?? 99) - (b.hit?.t ?? 99));
+  const signature = ordered.map(f => `${f.label}:${f.estimated}:${f.hit?.label ?? ''}:${f.hit ? Math.ceil(f.hit.t * 2) / 2 : ''}`).join('|');
+  if (panel.dataset.signature !== signature || !panel.querySelector('li')) {
+    panel.dataset.signature = signature;
+    const items = ordered.slice(0,2).map(f => {
+      const li = document.createElement('li'); li.className = f.hit ? 'risk' : 'forecast';
+      const title = document.createElement('b'), detail = document.createElement('span');
+      title.textContent = f.hit ? `${Noun(f.label)} · possibile ostacolo` : `${Noun(f.label)} · traiettoria prevista`;
+      detail.textContent = f.hit ? `${Noun(f.hit.label)} ${f.hit.t < 0.1 ? 'nelle immediate vicinanze' : 'tra circa ' + (Math.ceil(f.hit.t * 2) / 2).toFixed(1).replace('.', ',') + ' s'}${f.estimated ? ' · posizione stimata' : ''}` : `Proiezione a 3 secondi${f.estimated ? ' · posizione stimata' : ' dalla velocità rilevata'}`;
+      li.append(title, detail); return li;
+    });
+    panel.querySelector('ul').replaceChildren(...(items.length ? items : [quiet(msg ? 'Nessun movimento confermato in questo istante.' : 'Previsioni in attesa di dati.')]));
+  }
+}

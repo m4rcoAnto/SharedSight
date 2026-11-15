@@ -10,7 +10,7 @@ import { RoomStore } from './state.mjs';
 const root = fileURLToPath(new URL('.', import.meta.url));
 const STATIC = {
   '/': 'public/index.html', '/app.js': 'public/app.js', '/scene.js': 'public/scene.js', '/models.js': 'public/models.js',
-  '/net.js': 'public/net.js', '/style.css': 'public/style.css',
+  '/demo-motion.mjs': 'public/demo-motion.mjs', '/net.js': 'public/net.js', '/style.css': 'public/style.css',
   '/shared/classes.mjs': 'shared/classes.mjs', '/shared/geometry.mjs': 'geometry.mjs',
   '/vendor/three.module.js': 'node_modules/three/build/three.module.js',
   '/vendor/three.core.js': 'node_modules/three/build/three.core.js',
