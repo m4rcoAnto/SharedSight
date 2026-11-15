@@ -492,7 +492,7 @@ export class SceneView {
       v.ring.visible = v.disc.visible = v.ring.material.opacity > 0.01;
       v.ring.position.set(v.x, v.y + 0.02, v.z); v.disc.position.set(v.x, v.y + 0.018, v.z); v.ring.scale.setScalar(v.sigma); v.disc.scale.setScalar(v.sigma);
 
-      if (e.path && !v.gone && !this.options.demo) {
+      if (e.path && !v.gone && !this.options.demo && !this.options.forecast) {
         const p = v.path.geometry.getAttribute('position'), d = v.path.geometry.getAttribute('lineDistance');
         let i = 0, px = v.x, pz = v.z, run = 0; p.setXYZ(i, px, v.y + 0.04, pz); d.setX(i++, 0);
         for (let j = 0; j + 1 < e.path.length && i < 5; j += 2) {
@@ -593,7 +593,7 @@ export class SceneView {
     if (!this.demoLines) { this.demoLines = new Map(); }
     if (now - (this.demoAt ?? -Infinity) < 150) return;
     this.demoAt = now;
-    const forecasts = this.options.demo ? forecastMotion([...this.entities.values()].filter(v => !v.gone).map(v => v.data), this.walls ?? []) : [];
+    const forecasts = this.options.demo || this.options.forecast ? forecastMotion([...this.entities.values()].filter(v => !v.gone).map(v => v.data), this.walls ?? []) : [];
     this.demoForecasts = forecasts;
     const ids = new Set(forecasts.map(f => f.id));
     for (const [id, line] of this.demoLines) if (!ids.has(id)) {

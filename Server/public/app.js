@@ -19,6 +19,7 @@ const noun = label => IT[label] ?? label;
 const Noun = label => { const n = noun(label); return n[0].toUpperCase() + n.slice(1); };
 const OCCLUDER = { wall: 'dietro una parete', door: 'dietro una porta', object: 'dietro un oggetto' };
 
+let present = false, wantPresent = new URLSearchParams(location.hash.slice(1)).get('present') === '1', plainFooter = null, plainSub = null;
 let token = '', session = '1234', link = null, last = null, messages = 0, sceneStats = { fps: 0 }, lastEvent = 0;
 const cards = new Map(), previews = new Map();
 const scene = new SceneView($('viewport'), { labelFor: noun, onStats: s => { sceneStats = s; } });
@@ -63,8 +64,8 @@ $('pairClose').onclick = () => { $('pairPanel').hidden = true; $('pair').setAttr
 $('pairAddress').onchange = drawPair;
 
 function start() {
-  scene.setOptions({ demo: session === 'DEMO', zones: session !== 'DEMO' });
-  setupPitch(session === 'DEMO');
+  present = session === 'DEMO' || wantPresent;
+  applyPresent();
   link?.close(); last = null; lastEvent = 0; previews.clear();
   $('events').replaceChildren(quiet('Quando un oggetto esce dalla vista di un iPhone ed entra in quella di un altro, compare qui.'));
   link = connect({ token, session, onStatus: setStatus, onMessage(msg) {
@@ -219,8 +220,20 @@ const params = new URLSearchParams(location.hash.slice(1));
 if (params.get('token')) { $('token').value = token = params.get('token'); $('session').value = session = params.get('session') ?? '1234'; start(); }
 window.sharedSight = { scene, get last() { return last; } };
 
-function setupPitch(enabled) {
-  document.body.classList.toggle('pitch', enabled);
+// Presentation layout. Always on for the synthetic DEMO session; for a live session it is a choice ("Presentazione"
+// button, or "&present=1" in the address) and every label then says the data are live measurements, not a simulation.
+function applyPresent() {
+  const demo = session === 'DEMO';
+  scene.setOptions({ demo, forecast: present, zones: !present });
+  setupPitch(present, demo);
+  $('present').setAttribute('aria-pressed', present); $('present').disabled = demo;
+  $('zones').setAttribute('aria-pressed', !present);
+}
+$('present').onclick = () => { wantPresent = present = !present; applyPresent(); renderDemoMotion(last); };
+
+function setupPitch(enabled, demo = true) {
+  document.body.classList.toggle('pitch', enabled); document.body.classList.toggle('live', enabled && !demo);
+  plainFooter ??= document.querySelector('footer').textContent; plainSub ??= document.querySelector('.brand .sub').textContent;
   let hero = $('pitch-intro');
   if (!hero) {
     hero = document.createElement('section'); hero.id = 'pitch-intro';
@@ -237,26 +250,30 @@ function setupPitch(enabled) {
     $('viewport').append(legend);
   }
   hero.hidden = !enabled; $('pitch-guide').hidden = !enabled; $('demo-motion').hidden = !enabled;
-  if (enabled) {
-    document.querySelector('.brand .sub').textContent = 'Many eyes. Fewer blind spots.';
-    document.querySelector('footer').textContent = 'Prototipo sperimentale · Dati sintetici, non misure dal vivo · Le sagome rappresentano categorie di oggetti · Supporto alla consapevolezza, non dispositivo di navigazione.';
-    $('zones').setAttribute('aria-pressed', 'false');
-  }
+  hero.querySelector('.simulation-badge').textContent = demo ? 'DEMO SIMULATA' : 'DAL VIVO';
+  document.querySelector('.brand .sub').textContent = enabled ? 'Many eyes. Fewer blind spots.' : plainSub;
+  document.querySelector('footer').textContent = !enabled ? plainFooter
+    : `Prototipo sperimentale · ${demo ? 'Dati sintetici, non misure dal vivo' : 'Posizioni misurate dagli iPhone collegati; le previsioni sono stime'} · Le sagome rappresentano categorie di oggetti · Supporto alla consapevolezza, non dispositivo di navigazione.`;
 }
 
 function renderDemoMotion(msg) {
-  if (session !== 'DEMO') return;
-  const panel = $('demo-motion');
+  if (!present) return;
+  const panel = $('demo-motion'), demo = session === 'DEMO';
+  const liveDevices = msg?.devices.filter(d => d.live) ?? [];
+  // The phone taken as "the user's": the simulated one in the demo, otherwise the first phone that connected.
+  const userPhone = demo ? 'demo-user' : liveDevices[0]?.id, phones = liveDevices.length;
+  const caption = document.querySelector('.pitch-caption p');
+  if (caption) caption.textContent = demo ? '3 iPhone virtuali · un unico spazio condiviso' : `${phones} iPhone ${phones === 1 ? 'collegato' : 'collegati'} · un unico spazio condiviso`;
   const entities = msg?.spaces.find(s => s.key === chosen)?.entities.filter(e => e.state !== 'lost') ?? [];
   const observed = entities.filter(e => e.state === 'observed');
-  const shared = observed.filter(e => e.seenBy?.length && !e.seenBy.includes('demo-user'));
+  const shared = observed.filter(e => e.seenBy?.length && !e.seenBy.includes(userPhone));
   const hidden = entities.filter(e => e.state === 'hidden');
   $('pitch-seen').textContent = observed.length;
   $('pitch-shared').textContent = shared.length;
   $('pitch-estimated').textContent = hidden.length;
   const subject = shared.find(e => ['person','dog'].includes(e.label));
-  $('pitch-state').textContent = !msg ? 'Connessione alla demo…' : subject ? 'Fuori vista. Ancora rilevato.' : hidden.length ? 'Non più visibile. Posizione stimata.' : 'Tre prospettive, una stanza.';
-  $('pitch-explain').textContent = !msg ? 'In attesa dei dati della simulazione.' : subject ? `${Noun(subject.label)} fuori vista per l’iPhone utente, rilevato da un altro telefono. L’informazione resta disponibile nello spazio condiviso.` : hidden.length ? 'Quando nessuno vede un soggetto, la previsione resta esplicitamente una stima e viene abbandonata se troppo incerta.' : 'I rilevamenti dei tre iPhone vengono riuniti nello stesso modello spaziale, aggiornato durante il movimento.';
+  $('pitch-state').textContent = !msg ? (demo ? 'Connessione alla demo…' : 'In attesa degli iPhone…') : subject ? 'Fuori vista. Ancora rilevato.' : hidden.length ? 'Non più visibile. Posizione stimata.' : demo ? 'Tre prospettive, una stanza.' : phones > 1 ? `${phones} prospettive, una stanza.` : phones === 1 ? 'Un iPhone collegato.' : 'Nessun iPhone collegato.';
+  $('pitch-explain').textContent = !msg ? (demo ? 'In attesa dei dati della simulazione.' : 'In attesa dei dati dagli iPhone.') : subject ? `${Noun(subject.label)} fuori vista per ${demo ? 'l’iPhone utente' : `«${liveDevices[0]?.name ?? 'iPhone'}»`}, rilevato da un altro telefono. L’informazione resta disponibile nello spazio condiviso.` : hidden.length ? 'Quando nessuno vede un soggetto, la previsione resta esplicitamente una stima e viene abbandonata se troppo incerta.' : demo || phones > 1 ? `I rilevamenti ${demo ? 'dei tre' : 'degli'} iPhone vengono riuniti nello stesso modello spaziale, aggiornato durante il movimento.` : 'Con un solo iPhone non c’è ancora nulla da condividere: collegane un altro con «Collega iPhone».';
   const forecasts = msg ? scene.demoForecasts ?? [] : [];
   const ordered = [...forecasts].sort((a,b) => (a.hit?.t ?? 99) - (b.hit?.t ?? 99));
   const signature = ordered.map(f => `${f.label}:${f.estimated}:${f.hit?.label ?? ''}:${f.hit ? Math.ceil(f.hit.t * 2) / 2 : ''}`).join('|');
