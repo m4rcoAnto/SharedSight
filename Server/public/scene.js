@@ -7,13 +7,16 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createModel } from '/models.js';
 import { classInfo } from '/shared/classes.mjs';
-import { wallFromPlane, visibilityFan } from '/shared/geometry.mjs';
+import { wallFromPlane, visibilityFan, moveWithWalls } from '/shared/geometry.mjs';
 
 export const DEVICE_COLORS = ['#2f7fd1', '#e0722f', '#2f9d6a', '#a45bc7', '#c7a02f', '#d14f7a'];
 const BG = 0xf3eee3, WALL = 0xfbf7ee, WALL_TOP = 0xe9e1d0;
 // The view runs 100 ms behind the hub, so that between two phone frames (20 per second) it always has a state
 // before and after to interpolate between: continuous motion instead of a sequence of snapshots.
 const INTERP_DELAY = 100, MAX_EXTRAPOLATE = 250;   // ms; states that are late are extrapolated with their velocity
+// Each phone's own track: where it has been (TRAIL_MS, one point per TRAIL_STEP walked) and, while it moves faster
+// than HEADING_MIN_SPEED, where it would be in HEADING_S seconds at its measured velocity. An estimate, nothing more.
+const TRAIL_MS = 20000, TRAIL_STEP = 0.08, TRAIL_MAX = 400, HEADING_S = 2, HEADING_MIN_SPEED = 0.3;
 const lerp = (a, b, k) => a + (b - a) * k;
 const angleLerp = (a, b, k) => { let d = ((b - a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI; return a + d * k; };
 
@@ -135,8 +138,15 @@ export class SceneView {
       if (!v) v = this.makeCamera(c);
       v.buffer.push({ t: msg.t, x: c.cam[0], y: c.cam[1], z: c.cam[2], yaw: c.cam[3] }); if (v.buffer.length > 6) v.buffer.shift();
       v.data = c;
+      // Received positions only: the trail and the velocity are what the phone reported, not a prediction.
+      const x = c.cam[0], z = c.cam[2], tail = v.trail[v.trail.length - 1];
+      if (!tail || Math.hypot(x - tail.x, z - tail.z) >= TRAIL_STEP) { v.trail.push({ t: msg.t, x, z }); if (v.trail.length > TRAIL_MAX - 1) v.trail.shift(); }
+      while (v.trail.length && msg.t - v.trail[0].t > TRAIL_MS) v.trail.shift();
+      v.hist.push({ t: msg.t, x, z }); while (v.hist.length > 2 && msg.t - v.hist[0].t > 800) v.hist.shift();
+      const first = v.hist[0], span = (msg.t - first.t) / 1000;
+      if (span >= 0.3) { v.vx = (x - first.x) / span; v.vz = (z - first.z) / span; } else { v.vx = v.vz = 0; }
     }
-    for (const [id, v] of this.cams) if (!camsSeen.has(id)) { this.camGroup.remove(v.group); this.zoneGroup.remove(v.fan, v.outline); v.fan.geometry.dispose(); v.outline.geometry.dispose(); this.cams.delete(id); }
+    for (const [id, v] of this.cams) if (!camsSeen.has(id)) this.dropCamera(id, v);
     if (!this.framed && (this.entities.size || this.cams.size || this.floorMeshes?.length)) { this.fit(); this.framed = true; }
   }
 
@@ -226,7 +236,8 @@ export class SceneView {
       if (onDrawn(p)) continue;
       drawn.push(p);
       if (p.kind === 'inferred') { this.addInferredWall(p, y, H); continue; }
-      if (p.kind === 'door') { wall(p, y, y + Math.min(2.05, H)); if (H > 2.15) wall(p, y + 2.05, y + H, 'wall'); }
+      // A door can be closed: it is an obstacle, drawn exactly like a wall. Only a recorded passage ('opening') is open.
+      if (p.kind === 'door') wall(p, y, y + H, 'wall');
       else if (p.kind === 'opening') { if (H > 2.15) wall(p, y + 2.05, y + H, 'wall'); continue; }   // a doorway: only the wall above it
       else if (p.kind === 'window') { wall(p, y, y + 0.9, 'wall'); wall(p, y + 0.9, y + Math.min(2.1, H)); if (H > 2.2) wall(p, y + 2.1, y + H, 'wall'); }
       else wall(p, y, y + H);
@@ -289,10 +300,7 @@ export class SceneView {
       mesh.add(frame, glass);
       for (let i = 1; i < 2; i++) { const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, h - 0.1, 0.2), this.materials.frame); bar.position.set(0, h / 2, 0); mesh.add(bar); }
       for (const y of [h / 3, 2 * h / 3]) { const bar = new THREE.Mesh(new THREE.BoxGeometry(len - 0.1, 0.05, 0.2), this.materials.frame); bar.position.y = y; mesh.add(bar); }
-    } else if (w.kind === 'door') {
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(len, h, 0.06), this.materials.door); mesh.position.y = h / 2;
-      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), this.materials.frame); knob.position.set(len / 2 - 0.1, 0, 0.06); mesh.add(knob);
-    } else {
+    } else {                                             // walls and doors alike: obstacles, same look
       mesh = new THREE.Mesh(new THREE.BoxGeometry(len + 0.1, h, 0.1), [this.materials.wall, this.materials.wall, this.materials.wallTop, this.materials.wall, this.materials.wall, this.materials.wall]);
       mesh.position.y = h / 2;
     }
@@ -341,7 +349,13 @@ export class SceneView {
     v.labelSprite.material.map.dispose(); v.labelSprite.material.dispose();
     this.entities.delete(v.id);
   }
-  clearThings() { for (const v of [...this.entities.values()]) this.dropEntity(v); for (const [id, v] of this.cams) { this.camGroup.remove(v.group); this.zoneGroup.remove(v.fan, v.outline); this.cams.delete(id); } }
+  clearThings() { for (const v of [...this.entities.values()]) this.dropEntity(v); for (const [id, v] of [...this.cams]) this.dropCamera(id, v); }
+  dropCamera(id, v) {
+    this.camGroup.remove(v.group, v.trailLine, v.heading); this.zoneGroup.remove(v.fan, v.outline);
+    for (const o of [v.fan, v.outline, v.trailLine, v.heading]) o.geometry.dispose();
+    v.trailLine.material.dispose(); v.heading.material.dispose();
+    this.cams.delete(id);
+  }
 
   makeCamera(c) {
     const color = new THREE.Color(this.colorOf(c.id)), group = new THREE.Group(), body = new THREE.Group();
@@ -361,7 +375,16 @@ export class SceneView {
     const outline = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute('position', fanGeometry.getAttribute('position')), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.32, depthTest: false }));
     outline.renderOrder = 3; outline.frustumCulled = false; outline.geometry.setDrawRange(0, 50);
     this.zoneGroup.add(fan, outline);
-    const v = { id: c.id, group, body, pole, foot, label, fan, outline, buffer: [], data: c, x: c.cam[0], y: c.cam[1], z: c.cam[2], yaw: c.cam[3] ?? 0, fanAt: 0 };
+    // Its own track on the floor, in world coordinates: a solid trail behind, a faint dashed heading ahead.
+    const trailLine = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(TRAIL_MAX * 3), 3)),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85, depthTest: false }));
+    trailLine.frustumCulled = false; trailLine.renderOrder = 6; trailLine.geometry.setDrawRange(0, 0);
+    const heading = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3))
+      .setAttribute('lineDistance', new THREE.Float32BufferAttribute(new Float32Array(2), 1)),
+      new THREE.LineDashedMaterial({ color, dashSize: 0.12, gapSize: 0.1, transparent: true, opacity: 0.4, depthTest: false }));
+    heading.frustumCulled = false; heading.renderOrder = 6; heading.visible = false;
+    this.camGroup.add(trailLine, heading);
+    const v = { id: c.id, group, body, pole, foot, label, fan, outline, trailLine, heading, trail: [], hist: [], vx: 0, vz: 0, buffer: [], data: c, x: c.cam[0], y: c.cam[1], z: c.cam[2], yaw: c.cam[3] ?? 0, fanAt: 0 };
     this.cams.set(c.id, v);
     return v;
   }
@@ -506,7 +529,10 @@ export class SceneView {
       v.labelSprite.visible = showLabel;
       if (showLabel) {
         const exitText = !e.exit ? '' : e.exit.inMs > 150 ? ` · esce tra ${(Math.ceil(e.exit.inMs / 500) / 2).toFixed(1).replace('.', ',')} s` : ' · attesa ora';
-        const suffix = e.state === 'lost' ? ' · persa' : estimate ? (exitText || ` · stimata ±${e.sigma.toFixed(1).replace('.', ',')} m`) : e.state === 'remembered' ? ' · ricordato' : '';
+        // Confidence of the estimate (the hub's display heuristic): shown as a percentage that falls while unseen.
+        const pct = e.conf == null ? '' : ` ${Math.round(e.conf * 100)}%`;
+        const suffix = e.state === 'lost' ? ' · persa' : estimate ? ` · stimata${pct}` + (exitText || ` · ±${e.sigma.toFixed(1).replace('.', ',')} m`)
+          : e.state === 'remembered' ? ` · ricordato${e.conf != null && e.conf < 0.995 ? pct : ''}` : '';
         drawLabel(v.labelSprite, this.labelFor(e.label) + suffix, (e.seenBy ?? []).map(id => this.colorOf(id)), e.state !== 'observed');
         v.labelSprite.position.set(v.x, v.y + Math.max(e.h, 0.3) + 0.28, v.z);
         v.labelSprite.scale.set(labelH * 6, labelH, 1);
@@ -526,6 +552,19 @@ export class SceneView {
       v.group.position.set(v.x, 0, v.z); v.body.position.y = v.y; v.body.rotation.y = -v.yaw;
       v.pole.position.y = (v.y + floor) / 2; v.pole.scale.y = Math.max(v.y - floor, 0.01); v.foot.position.y = floor + 0.025;
       v.label.visible = this.options.labels; v.label.position.set(0, v.y + 0.32, 0); v.label.scale.set(labelH * 6, labelH, 1);
+      // Trail: the received positions, ending at the drawn phone. Heading: 2 s at the measured velocity, only while
+      // it is really moving, stopped at the first known wall (measured or continued) so it is never drawn through one.
+      const tp = v.trailLine.geometry.getAttribute('position'), n = Math.min(v.trail.length, TRAIL_MAX - 1), ty = floor + 0.045;
+      for (let i = 0; i < n; i++) tp.setXYZ(i, v.trail[i].x, ty, v.trail[i].z);
+      tp.setXYZ(n, v.x, ty, v.z); tp.needsUpdate = true; v.trailLine.geometry.setDrawRange(0, n ? n + 1 : 0);
+      const speed = Math.hypot(v.vx, v.vz);
+      v.heading.visible = speed > HEADING_MIN_SPEED;
+      if (v.heading.visible) {
+        const end = moveWithWalls(v.x, v.z, v.vx * HEADING_S, v.vz * HEADING_S, this.walls ?? [], floor);
+        const hp = v.heading.geometry.getAttribute('position'), hd = v.heading.geometry.getAttribute('lineDistance');
+        hp.setXYZ(0, v.x, ty, v.z); hp.setXYZ(1, end.x, ty, end.z); hd.setX(0, 0); hd.setX(1, Math.hypot(end.x - v.x, end.z - v.z));
+        hp.needsUpdate = true; hd.needsUpdate = true;
+      }
       if (this.options.zones && now - v.fanAt > 90) {            // ~11 Hz is plenty for the coverage polygons
         v.fanAt = now;
         const fan = visibilityFan({ x: v.x, y: v.y, z: v.z, yaw: v.yaw }, v.data.fov ?? 55, 12, this.walls ?? [], blockers, 48, floor);

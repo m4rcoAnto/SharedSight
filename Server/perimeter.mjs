@@ -60,7 +60,8 @@ export class Perimeter {
     this.patches = new Map();   // `${device}|${planeID}` -> {ax, az, bx, bz, y0, y1, kind, device}
     this.floors = new Map();    // `${device}|${planeID}` -> {y, points: [[x, z]...]}
     this.points = [];           // phone positions on the floor (inside the room by definition)
-    this.passes = [];           // [x, z] where a phone saw something through a continued (not measured) wall
+    this.passes = [];           // [x, z] where a phone saw something through a continued (not measured) wall,
+                                // or where a person/animal was measured walking across a wall line (a doorway)
     this.scan = new Map();      // `${device}|cell|direction` -> {x, z, nx, nz, n}: vertical surfaces hit by depth rays
     this.free = new Map();      // `${device}|cell` -> [x, z]: floor crossed by depth rays (free space, not a wall)
     this.axis = null;
@@ -198,6 +199,7 @@ export class Perimeter {
     const c = Math.cos(axis), s = Math.sin(axis);
     const toU = (x, z) => x * c + z * s, toV = (x, z) => -x * s + z * c;
     const toXZ = (u, v) => [u * c - v * s, u * s + v * c];
+    const passList = this.passes.map(([x, z]) => [toU(x, z), toV(x, z)]), half = this.o.passWidth / 2;
 
     // 2. Snap patches to the axes: family 0 runs along u (constant v), family 1 along v (constant u).
     const fam = [[], []], diagonal = [];
@@ -323,14 +325,14 @@ export class Perimeter {
     const describe = (s, along0, along1, constIsV) => {
       const parts = [], seenParts = [];
       if (s.line) {
+        // Where a phone saw through this side, or someone was measured walking through it, there is an opening,
+        // whatever was continued or measured there: it is cut out of walls and doors alike.
+        const passed = passesOn(constIsV ? 0 : 1, s.off).filter(o => o.s1 > along0 && o.s0 < along1)
+          .map(o => ({ s0: Math.max(o.s0, along0), s1: Math.min(o.s1, along1), kind: 'opening' }));
         for (const i of s.line.walls) seenParts.push({ s0: Math.max(i.s0, along0), s1: Math.min(i.s1, along1), kind: 'wall' });
-        for (const o of s.line.openings) seenParts.push({ s0: Math.max(o.s0, along0), s1: Math.min(o.s1, along1), kind: o.kind });
-        // Where a phone saw through this side, there is an opening, whatever the continuation said.
-        for (const [x, z] of this.passes) {
-          const across = constIsV ? toV(x, z) : toU(x, z), along = constIsV ? toU(x, z) : toV(x, z);
-          if (Math.abs(across - s.off) <= 0.35 && along > along0 && along < along1)
-            seenParts.push({ s0: along - this.o.passWidth / 2, s1: along + this.o.passWidth / 2, kind: 'opening' });
-        }
+        for (const o of s.line.openings) for (const piece of o.kind === 'door' ? cut(o, passed) : [o])
+          seenParts.push({ s0: Math.max(piece.s0, along0), s1: Math.min(piece.s1, along1), kind: o.kind });
+        seenParts.push(...passed);
       }
       // A wall seen on a side is a wall along the whole side, corner to corner, until something is seen through it:
       // the parts nobody measured are 'extended' (believed), not 'inferred' (guessed side).
@@ -352,6 +354,8 @@ export class Perimeter {
         return { kind: p.kind, ax: q(ax), az: q(az), bx: q(bx), bz: q(bz) };
       });
     };
+    // Recorded passages lying on the line `off` of family k (0: along u, 1: along v), as intervals along it.
+    function passesOn(k, off) { return passList.filter(p => Math.abs(p[1 - k] - off) <= 0.35).map(p => ({ s0: p[k] - half, s1: p[k] + half })); }
     const seg = (k, off, s0, s1, kind) => {
       const [ax, az] = k === 0 ? toXZ(s0, off) : toXZ(off, s0), [bx, bz] = k === 0 ? toXZ(s1, off) : toXZ(off, s1);
       return { kind, ax: q(ax), az: q(az), bx: q(bx), bz: q(bz) };
@@ -376,8 +380,10 @@ export class Perimeter {
       for (let k = 0; k < 2; k++) for (const l of lines[k]) {
         const [a0, a1] = box[k], [c0, c1] = box[1 - k];
         if (used.has(l.id) || l.seen < this.o.minInterior || l.off <= c0 + this.o.lineTolerance || l.off >= c1 - this.o.lineTolerance) continue;
-        for (const w of l.walls) { const s0 = Math.max(w.s0, a0), s1 = Math.min(w.s1, a1); if (s1 - s0 >= 0.3) interior.push(seg(k, l.off, s0, s1, 'wall')); }
-        for (const o of l.openings) { const s0 = Math.max(o.s0, a0), s1 = Math.min(o.s1, a1); if (s1 - s0 >= 0.3) interior.push(seg(k, l.off, s0, s1, o.kind)); }
+        const passed = passesOn(k, l.off);
+        for (const w of l.walls.flatMap(w => cut(w, passed))) { const s0 = Math.max(w.s0, a0), s1 = Math.min(w.s1, a1); if (s1 - s0 >= 0.3) interior.push(seg(k, l.off, s0, s1, 'wall')); }
+        for (const o of l.openings.flatMap(o => o.kind === 'door' ? cut(o, passed) : [o])) { const s0 = Math.max(o.s0, a0), s1 = Math.min(o.s1, a1); if (s1 - s0 >= 0.3) interior.push(seg(k, l.off, s0, s1, o.kind)); }
+        for (const o of passed) { const s0 = Math.max(o.s0, a0), s1 = Math.min(o.s1, a1); if (s1 - s0 >= 0.3) interior.push(seg(k, l.off, s0, s1, 'opening')); }
       }
       for (const w of diagonal) {
         if (OPEN.has(w.kind) || w.scan || Math.hypot(w.bx - w.ax, w.bz - w.az) < this.o.minDiagonal) continue;
@@ -422,6 +428,32 @@ export class Perimeter {
       this.dirty = true;
     }
     return verdict;
+  }
+
+  /**
+   * A person or animal was MEASURED at (x0, z0) and shortly after at (x1, z1). If the straight line between the two
+   * crosses a wall part (measured, continued, or a door) with both ends clearly on opposite sides, they walked
+   * through it: a passage is remembered there and that part becomes an 'opening' at the next update.
+   * The margin is larger for measured walls and doors, so that position noise next to a wall never opens it.
+   */
+  addCrossing(x0, z0, x1, z1) {
+    const r = this.room;
+    if (!r || ![x0, z0, x1, z1].every(Number.isFinite) || Math.hypot(x1 - x0, z1 - z0) > 2.5) return false;
+    let found = false;
+    for (const p of (r.rooms ?? [r]).flatMap(x => [...x.sides, ...x.interior])) {
+      if (p.kind !== 'wall' && p.kind !== 'door' && p.kind !== 'extended') continue;
+      const t = segCross(x0, z0, x1, z1, p.ax, p.az, p.bx, p.bz);
+      if (t == null) continue;
+      const dx = p.bx - p.ax, dz = p.bz - p.az, len = Math.hypot(dx, dz) || 1, margin = p.kind === 'extended' ? 0.2 : 0.3;
+      const side = (x, z) => ((x - p.ax) * dz - (z - p.az) * dx) / len;
+      if (Math.abs(side(x0, z0)) < margin || Math.abs(side(x1, z1)) < margin) continue;
+      const hit = [x0 + (x1 - x0) * t, z0 + (z1 - z0) * t];
+      found = true;
+      if (this.passes.some(([x, z]) => Math.hypot(x - hit[0], z - hit[1]) < 0.3)) continue;
+      this.passes.push(hit); if (this.passes.length > 200) this.passes.shift();
+      this.dirty = true;
+    }
+    return found;
   }
 
   /** Measured wall segments (perimeter parts actually seen, and inside walls), for line-of-sight in the world model.

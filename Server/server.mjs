@@ -16,6 +16,7 @@ const STATIC = {
   '/vendor/three.core.js': 'node_modules/three/build/three.core.js',
   '/vendor/OrbitControls.js': 'node_modules/three/examples/jsm/controls/OrbitControls.js',
   '/vendor/RoundedBoxGeometry.js': 'node_modules/three/examples/jsm/geometries/RoundedBoxGeometry.js',
+  '/vendor/qrcode.mjs': 'node_modules/qrcode-generator/dist/qrcode.mjs',
 };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' };
 
@@ -61,12 +62,14 @@ export function createHub({ token = randomBytes(16).toString('hex'), store = new
       sub.res.write(msg.text);
     }
   }
-  function subscribe(res, session) {
+  // What an iPhone needs to reach this hub: the dashboard is usually opened on localhost, which a phone cannot use.
+  const pairing = req => ({ addresses: lanAddresses(), port: req.socket.localPort });
+  function subscribe(res, session, req) {
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
     res.socket?.setNoDelay(true);
     const sub = { res, session, planes: new Map(), rooms: new Map(), revision: -1, idleTicks: 0 };
     subscribers.add(sub);
-    res.write(JSON.stringify({ type: 'hello', now: store.clock(), pushHz, stale: codeIsNewer(), features: ['room', 'scan'] }) + '\n');
+    res.write(JSON.stringify({ type: 'hello', now: store.clock(), pushHz, stale: codeIsNewer(), features: ['room', 'scan', 'pair'], pair: pairing(req) }) + '\n');
     res.on('close', () => { subscribers.delete(sub); if (!subscribers.size && timer) { clearInterval(timer); timer = null; } });
     if (!timer) { timer = setInterval(push, Math.round(1000 / pushHz)); timer.unref?.(); }
     push();
@@ -88,7 +91,8 @@ export function createHub({ token = randomBytes(16).toString('hex'), store = new
         if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return send(403, { error: 'Origin denied' });
         const session = url.searchParams.get('session') ?? '1234';
         if (req.method === 'GET' && url.pathname === '/api/state') return send(200, store.snapshot(session));
-        if (req.method === 'GET' && url.pathname === '/api/stream') return subscribe(res, session);
+        if (req.method === 'GET' && url.pathname === '/api/stream') return subscribe(res, session, req);
+        if (req.method === 'GET' && url.pathname === '/api/pair') return send(200, { ...pairing(req), session });
         if (req.method === 'GET' && url.pathname === '/api/preview') {
           const image = store.preview(session, url.searchParams.get('device') ?? '');
           if (!image) return send(404, { error: 'No preview' });

@@ -10,7 +10,18 @@
     <label>Sessione<input id="session" value="1234" maxlength="100" required></label>
     <button id="connectButton">Connetti</button>
   </form>
+  <button type="button" id="pair" disabled aria-expanded="false" aria-controls="pairPanel" title="Disponibile dopo la connessione">Collega iPhone</button>
   <span id="connection" class="status" role="status">Non connesso</span>
+  <div id="pairPanel" role="dialog" aria-labelledby="h-pair" hidden>
+    <h2 id="h-pair">Collega iPhone</h2>
+    <p>Nell'app Shared Sight inquadra questo codice: indirizzo, chiave e sessione vengono impostati senza digitarli.</p>
+    <label id="pairAddressRow" hidden>Indirizzo di rete di questo computer<select id="pairAddress"></select></label>
+    <canvas id="pairCode" role="img" width="260" height="260"></canvas>
+    <p id="pairNone" hidden>Nessun indirizzo di rete locale trovato: collega questo computer alla stessa rete Wi-Fi degli iPhone.</p>
+    <code id="pairUrl"></code><small id="pairSession"></small>
+    <small>Il codice contiene la chiave del server: mostralo solo a chi deve collegarsi.</small>
+    <button type="button" id="pairClose">Chiudi</button>
+  </div>
 </header>
 
 <main>
@@ -32,7 +43,7 @@
         <button type="button" id="reset">Visuale</button>
       </div>
       <div class="legend" aria-hidden="true">
-        <span><i class="solid"></i>visto ora</span><span><i class="ghost"></i>stimato (nessuno lo vede)</span><span><i class="shade"></i>zona d'ombra</span><span><i class="inferred"></i>parete stimata (non ancora vista)</span>
+        <span><i class="solid"></i>visto ora</span><span><i class="ghost"></i>stimato (nessuno lo vede)</span><span><i class="shade"></i>zona d'ombra</span><span><i class="inferred"></i>parete stimata (non ancora vista)</span><span><i class="track"></i><i class="heading"></i>percorso · direzione stimata</span>
       </div>
     </div>
   </section>

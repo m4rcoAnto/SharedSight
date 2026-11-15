@@ -2,6 +2,7 @@ import { SceneView } from '/scene.js';
 import { connect, fetchPreview } from '/net.js';
 import { groupColor } from '/models.js';
 import { classInfo } from '/shared/classes.mjs';
+import qrcode from '/vendor/qrcode.mjs';
 
 const $ = id => document.getElementById(id);
 const IT = { person: 'persona', bicycle: 'bicicletta', car: 'auto', motorcycle: 'moto', airplane: 'aereo', bus: 'autobus', train: 'treno', truck: 'camion', boat: 'barca',
@@ -28,7 +29,38 @@ function setStatus(kind, detail) {
   el.className = 'status' + (kind === 'connected' ? ' connected' : kind === 'unauthorized' || kind === 'lost' ? ' error' : '');
   el.textContent = { connecting: 'Connessione…', connected: 'Connesso · dati in tempo reale', unauthorized: 'Chiave server errata', lost: 'Connessione persa · nuovo tentativo…' }[kind] ?? detail ?? '';
   if (kind === 'lost' || kind === 'unauthorized') { last = null; renderPanels(); }
+  if (kind !== 'connected') { pairInfo = null; updatePair(); }
 }
+
+// "Collega iPhone": a QR code with the hub's address on the local network (told by the hub: this page is usually
+// open on localhost, which a phone cannot reach), the key and the session. Available only while connected.
+let pairInfo = null;
+function pairPayload(address) {
+  const url = `http://${address}:${pairInfo.port}`;
+  return { url, payload: `sharedsight://hub?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}&session=${encodeURIComponent(session)}` };
+}
+function drawPair() {
+  const addresses = pairInfo?.addresses ?? [], select = $('pairAddress'), canvas = $('pairCode');
+  if (select.dataset.sig !== addresses.join()) { select.dataset.sig = addresses.join(); select.replaceChildren(...addresses.map(a => new Option(a, a))); }
+  $('pairAddressRow').hidden = addresses.length < 2;
+  const address = addresses.includes(select.value) ? select.value : addresses[0];
+  canvas.hidden = !address; $('pairNone').hidden = !!address;
+  if (!address) { $('pairUrl').textContent = ''; $('pairSession').textContent = ''; return; }
+  const { url, payload } = pairPayload(address), qr = qrcode(0, 'M');
+  qr.addData(payload); qr.make();
+  const n = qr.getModuleCount(), quiet = 4, scale = Math.max(2, Math.floor(260 / (n + 2 * quiet))), size = (n + 2 * quiet) * scale, g = canvas.getContext('2d');
+  canvas.width = canvas.height = size; g.fillStyle = '#fff'; g.fillRect(0, 0, size, size); g.fillStyle = '#000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) g.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+  canvas.setAttribute('aria-label', `Codice QR per collegare un iPhone a ${url}, sessione ${session}`);
+  $('pairUrl').textContent = url; $('pairSession').textContent = `Sessione ${session}`;
+}
+function updatePair() {
+  $('pair').disabled = !pairInfo;
+  if (!pairInfo) { $('pairPanel').hidden = true; $('pair').setAttribute('aria-expanded', 'false'); } else if (!$('pairPanel').hidden) drawPair();
+}
+$('pair').onclick = () => { const open = $('pairPanel').hidden; $('pairPanel').hidden = !open; $('pair').setAttribute('aria-expanded', open); if (open) drawPair(); };
+$('pairClose').onclick = () => { $('pairPanel').hidden = true; $('pair').setAttribute('aria-expanded', 'false'); $('pair').focus(); };
+$('pairAddress').onchange = drawPair;
 
 function start() {
   link?.close(); last = null; lastEvent = 0; previews.clear();
@@ -37,7 +69,7 @@ function start() {
     if (msg.type === 'planes') scene.setSurfaces(msg.device, msg.space, msg.planes);
     else if (msg.type === 'room') scene.setRoom(msg.space, msg.room);
     // A hub started before its code was last changed still runs the old code: say so instead of looking broken.
-    else if (msg.type === 'hello') $('stale').hidden = !(msg.stale || !msg.features);
+    else if (msg.type === 'hello') { $('stale').hidden = !(msg.stale || !msg.features); pairInfo = msg.pair?.port ? msg.pair : null; updatePair(); }
     else if (msg.type === 'world') { last = msg; messages++; chooseSpace(msg); scene.update(msg); }
   } });
   $('connectButton').textContent = 'Riconnetti';
@@ -65,11 +97,13 @@ for (const [id, option] of [['zones', 'zones'], ['labels', 'labels']]) $(id).onc
 const quiet = text => Object.assign(document.createElement('li'), { className: 'quiet', textContent: text });
 function stateText(e, names) {
   const who = (e.seenBy ?? []).map(id => names.get(id) ?? 'iPhone');
+  // The hub's confidence in an estimate (a display heuristic): it falls while nobody sees the object.
+  const pct = e.conf == null ? '' : ` ${Math.round(e.conf * 100)}%`;
   if (e.state === 'observed') return who.length > 1 ? `in vista · ${who.length} iPhone` : `in vista · ${who[0] ?? 'un iPhone'}`;
-  if (e.state === 'remembered') return e.reason === 'occluded' ? 'ricordato · coperto alla vista' : 'ricordato · fuori campo';
+  if (e.state === 'remembered') return (e.reason === 'occluded' ? 'ricordato · coperto alla vista' : 'ricordato · fuori campo') + (e.conf != null && e.conf < 0.995 ? ` · affidabilità${pct}` : '');
   if (e.state === 'lost') return 'stima abbandonata';
   if (e.reason === 'unconfirmed') return 'in attesa di conferma';
-  return `fuori vista per tutti (${e.reason === 'occluded' ? OCCLUDER[e.occluder] ?? 'coperto' : 'fuori campo'}) · posizione stimata ±${e.sigma.toFixed(1).replace('.', ',')} m`;
+  return `fuori vista per tutti (${e.reason === 'occluded' ? OCCLUDER[e.occluder] ?? 'coperto' : 'fuori campo'}) · posizione stimata${pct} · ±${e.sigma.toFixed(1).replace('.', ',')} m`;
 }
 function eventText(ev) {
   const n = Noun(ev.label), why = ev.relation === 'outOfView' || ev.reason === 'outOfView' ? 'fuori campo' : OCCLUDER[ev.occluder] ?? 'coperta alla vista';

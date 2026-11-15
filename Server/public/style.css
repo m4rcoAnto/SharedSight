@@ -63,3 +63,13 @@ footer{padding:10px 22px 16px;font-size:11px;color:var(--muted)}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
 
 #stale{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:5;background:#b3261e;color:#fff;padding:10px 16px;border-radius:14px;font-size:13px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.18);max-width:80%}#stale code{background:rgba(255,255,255,.18);padding:1px 6px;border-radius:6px}#stale[hidden]{display:none}
+
+header{position:relative}
+#pair:disabled{opacity:.5;cursor:default}
+#pairPanel{position:absolute;right:22px;top:100%;z-index:20;width:300px;max-width:calc(100vw - 28px);background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:0 15px 14px;display:flex;flex-direction:column;gap:9px;align-items:stretch}
+#pairPanel[hidden],#pairPanel [hidden]{display:none}
+#pairPanel h2{padding:13px 0 0}#pairPanel p{margin:0;font-size:12px;line-height:1.5;color:var(--muted)}
+#pairPanel canvas{width:100%;max-width:260px;height:auto;align-self:center;border-radius:8px;image-rendering:pixelated}
+#pairPanel code{align-self:center;font-size:13px;padding:3px 8px;user-select:all}#pairPanel small{font-size:11px;color:var(--muted);text-align:center}
+.legend .track{width:14px;height:0;border-top:2px solid #2f7fd1;border-radius:0;margin-right:2px;vertical-align:3px}
+.legend .heading{width:14px;height:0;border-top:2px dashed rgba(47,127,209,.5);border-radius:0;vertical-align:3px}

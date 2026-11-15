@@ -171,6 +171,7 @@ export class WorldModel {
         e.cloud.prune(q => sightRelation(cam, fov, this.o.rangeM, { id: e.id, x: q.x, z: q.z, y: e.y, h: e.h, r: 0.15 }, this.walls, others).relation === 'visible');
       }
     }
+    if (this.perimeter.dirty) this.refreshWalls();     // a measured crossing may just have opened a doorway
     // Bearing-only detections cannot renew a metric measurement or reduce its uncertainty.
     this.classify(t, true);
     this.merge(); // Fusion changes only on input, never on rendering ticks.
@@ -188,7 +189,9 @@ export class WorldModel {
         id: e.id, label: e.label, x: round(this.pos(e).x), y: round(e.y), z: round(this.pos(e).z),
         cloud: e.cloud && e.state === 'hidden' && !e.cloud.empty ? e.cloud.sample(60) : undefined,
         vx: e.info.dyn && e.base && this.moving(e.base) ? round(e.ax.v) : 0, vz: e.info.dyn && e.base && this.moving(e.base) ? round(e.az.v) : 0,
-        h: round(e.h), w: round(e.w), state: e.state, reason: e.reason ?? null, occluder: e.occluder?.kind ?? null,
+        // A mover's drawn size is the largest measured in its last 3 s of measurements, and stays frozen while nobody
+        // sees it: a half-covered person measures smaller just before disappearing and must not be drawn shrinking.
+        h: round(e.info.dyn ? e.heldH ?? e.h : e.h), w: round(e.info.dyn ? e.heldW ?? e.w : e.w), conf: this.confidence(e), state: e.state, reason: e.reason ?? null, occluder: e.occluder?.kind ?? null,
         ageMs: Math.max(0, this.now - e.lastObs), ageUncertaintyMs: Number.isFinite(e.ageUncertaintyMs) ? e.ageUncertaintyMs : null,
         stateAt: e.last, receivedAt: e.receivedAt, reportValid: this.reportValid(e, this.now),
         invalidationReason: this.reportInvalidation(e, this.now),
@@ -197,6 +200,26 @@ export class WorldModel {
         exit: e.exit && e.state === 'hidden' ? { x: round(e.exit.x), z: round(e.exit.z), inMs: Math.round(e.exit.t - this.now), halfMs: Math.round(e.exit.half) } : undefined,
       };
     });
+  }
+
+  /**
+   * How much the dashboard should still trust an estimate, 0..1. A DISPLAY HEURISTIC, not a calibrated probability:
+   *   conf = (1 - age / maxAge) x (maxSigma - sigma) / (maxSigma - sigma when it was last seen) x cloud mass share
+   * with maxAge = hiddenMaxMs (movers) or staticMemoryMs (furniture), maxSigma = cloudMaxSigmaM / hiddenMaxSigmaM,
+   * and the mass term (mass - cloudMinMass) / (1 - cloudMinMass) only when a cloud exists. Each factor reaches 0
+   * exactly where classify() abandons the estimate. 1 while observed, 0 once lost, never rises while unobserved.
+   */
+  confidence(e) {
+    if (e.state === 'observed') { e.confMin = 1; e.confSigma0 = null; return 1; }
+    if (e.state === 'lost') return 0;
+    const unit = v => Math.min(Math.max(v, 0), 1), sigma = this.sigma(e);
+    const maxSigma = e.cloud ? this.o.cloudMaxSigmaM : this.o.hiddenMaxSigmaM;
+    e.confSigma0 ??= Math.min(sigma, maxSigma * 0.8);
+    const age = unit(1 - (this.now - e.lastObs) / (e.info.dyn ? this.o.hiddenMaxMs : this.o.staticMemoryMs));
+    const spread = unit((maxSigma - sigma) / (maxSigma - e.confSigma0));
+    const mass = e.cloud ? (e.cloud.empty ? 0 : unit((e.cloud.mass - this.o.cloudMinMass) / (1 - this.o.cloudMinMass))) : 1;
+    e.confMin = Math.min(e.confMin ?? 1, age * spread * mass);
+    return round(e.confMin);
   }
 
   /**
@@ -324,6 +347,17 @@ export class WorldModel {
       if (finiteP(o.size.h)) e.h += (clamp(o.size.h, e.info.h) - e.h) * 0.15;
       if (finiteP(o.size.w)) e.w += (clamp(o.size.w, e.info.w) - e.w) * 0.15;
     }
+    (e.sizes ??= []).push([t, e.h, e.w]);
+    while (e.sizes.length > 1 && (t - e.sizes[0][0] > 3000 || e.sizes.length > 80)) e.sizes.shift();
+    e.heldH = Math.max(...e.sizes.map(s => s[1])); e.heldW = Math.max(...e.sizes.map(s => s[2]));
+    // People do not walk through walls: a mover MEASURED on one side of a wall line and, within 1.2 s, measured on
+    // the other side went through a doorway there. Only measurements count, never predicted positions.
+    if (e.info.dyn) {
+      const m = (e.meas ??= []);
+      while (m.length && (measuredAtServer - m[0][0] > 1200 || m.length > 40)) m.shift();
+      if (m.length) this.perimeter.addCrossing(m[0][1], m[0][2], o.position.x, o.position.z);
+      m.push([measuredAtServer, o.position.x, o.position.z]);
+    }
     e.votes.set(o.label, (e.votes.get(o.label) ?? 0) + (o.confidence ?? 0.5));
     let best = e.label, score = -1;
     for (const [l, s] of e.votes) if (s > score) { best = l; score = s; }
@@ -338,7 +372,7 @@ export class WorldModel {
     this.invalidations.delete(e.id); this.invalidations.delete(`${deviceID}|${o.id}`);
     if (wasHidden && e.info.dyn) this.event('reacquired', e, { by: device.name });
     e.state = 'observed'; e.reason = null; e.occluder = null; e.hiddenSince = null; e.announcedHidden = false; e.exit = null;
-    e.cloud = null;
+    e.cloud = null; e.confMin = 1; e.confSigma0 = null;
   }
 
   reportInvalidation(e, t) {
