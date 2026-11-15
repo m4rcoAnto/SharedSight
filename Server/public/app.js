@@ -35,7 +35,7 @@ function setStatus(kind, detail) {
 
 // "Collega iPhone": a QR code with the hub's address on the local network (told by the hub: this page is usually
 // open on localhost, which a phone cannot reach), the key and the session. Available only while connected.
-let pairInfo = null;
+let pairInfo = null, wantPair = new URLSearchParams(location.hash.slice(1)).get('pair') === '1';
 function pairPayload(address) {
   const url = `http://${address}:${pairInfo.port}`;
   return { url, payload: `sharedsight://hub?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}&session=${encodeURIComponent(session)}` };
@@ -57,6 +57,8 @@ function drawPair() {
 }
 function updatePair() {
   $('pair').disabled = !pairInfo;
+  // "&pair=1" in the address opens the pairing panel as soon as the hub has said where it is.
+  if (pairInfo && wantPair) { wantPair = false; $('pairPanel').hidden = false; $('pair').setAttribute('aria-expanded', 'true'); }
   if (!pairInfo) { $('pairPanel').hidden = true; $('pair').setAttribute('aria-expanded', 'false'); } else if (!$('pairPanel').hidden) drawPair();
 }
 $('pair').onclick = () => { const open = $('pairPanel').hidden; $('pairPanel').hidden = !open; $('pair').setAttribute('aria-expanded', open); if (open) drawPair(); };

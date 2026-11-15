@@ -16,7 +16,7 @@ const STATIC = {
   '/vendor/three.core.js': 'node_modules/three/build/three.core.js',
   '/vendor/OrbitControls.js': 'node_modules/three/examples/jsm/controls/OrbitControls.js',
   '/vendor/RoundedBoxGeometry.js': 'node_modules/three/examples/jsm/geometries/RoundedBoxGeometry.js',
-  '/vendor/qrcode.mjs': 'node_modules/qrcode-generator/dist/qrcode.mjs',
+  '/vendor/qrcode.mjs': 'public/vendor/qrcode.mjs',
 };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' };
 

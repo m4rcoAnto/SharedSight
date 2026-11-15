@@ -76,6 +76,12 @@ final class ServerTransport {
     private var nextSend: Timestamp = 0
     private var lastPlanes: Timestamp = -.infinity
     private var lastPreview: Timestamp = -.infinity
+    /// Consecutive failed requests. One lost request on a busy Wi-Fi is retried at once and is not reported as a
+    /// lost server; only repeated failures are.
+    private var failures = 0
+    /// After a failure the camera pictures are left out for a while: the frames are then a few hundred bytes
+    /// instead of tens of kilobytes and get through a weak network far more easily.
+    private var lightUntil: Timestamp = -.infinity
     private(set) var status = "Disconnesso"
     private(set) var advice: Advice?
     /// Round trip of the last answered frame, seconds. Diagnostics only.
@@ -94,7 +100,7 @@ final class ServerTransport {
     func planesDue(changed: Bool, now: Timestamp) -> Bool {
         now - lastPlanes >= planesRefresh || (changed && now - lastPlanes >= planesMinGap)
     }
-    func previewDue(now: Timestamp) -> Bool { now - lastPreview >= previewInterval }
+    func previewDue(now: Timestamp) -> Bool { now >= lightUntil && now - lastPreview >= previewInterval }
     /// The surfaces must go with the very next frame (new AR map, or the frame of reference changed).
     func forcePlanes() { lastPlanes = -.infinity }
 
@@ -119,7 +125,7 @@ final class ServerTransport {
         task?.cancel(); task = nil; endpoint = nil
         self.token = token
         nextSend = 0; lastPlanes = -.infinity; lastPreview = -.infinity
-        advice = nil; roundTrip = nil
+        advice = nil; roundTrip = nil; failures = 0; lightUntil = -.infinity
         guard let url else { status = "Disconnesso"; return }
         guard let base = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
               ["http", "https"].contains(base.scheme?.lowercased() ?? ""), base.host != nil,
@@ -152,6 +158,7 @@ final class ServerTransport {
                 let now = CACurrentMediaTime()
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if error == nil && (code == 200 || code == 204) {
+                    self.failures = 0
                     self.status = "Connesso"
                     self.roundTrip = now - started
                     if carriedPlanes { self.lastPlanes = started }
@@ -170,10 +177,23 @@ final class ServerTransport {
                         self.advice = nil
                     }
                 } else {
-                    self.status = code == 401 ? "Chiave server errata" : "Server non raggiungibile (\(code)) — nuovo tentativo…"
-                    self.nextSend = now + 2
+                    self.failures += 1
                     self.lastPlanes = -.infinity          // the hub may have restarted: send the surfaces again
-                    self.advice = nil                     // nothing the hub said earlier is acted upon any more
+                    self.lightUntil = now + 6             // no pictures for a few seconds: small frames pass more easily
+                    if code == 401 {
+                        self.status = "Chiave server errata"
+                        self.nextSend = now + 2
+                        self.advice = nil
+                    } else if self.failures < 3 {
+                        // A single lost request (busy Wi-Fi, the hub restarting): try again almost at once and do
+                        // not call the server lost yet. What the hub said is kept; it ages out by itself.
+                        self.status = "Connessione instabile — nuovo tentativo…"
+                        self.nextSend = now + 0.25
+                    } else {
+                        self.status = "Server non raggiungibile (\(code)) — nuovo tentativo…"
+                        self.nextSend = now + min(2, 0.5 * Double(self.failures - 2))
+                        self.advice = nil                 // nothing the hub said earlier is acted upon any more
+                    }
                 }
             }
         }

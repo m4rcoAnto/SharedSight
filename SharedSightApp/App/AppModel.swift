@@ -87,7 +87,7 @@ final class AppModel: ObservableObject {
         if status == "Connesso" {
             hubConnectionPending = false
             answer(tr("Connected to the hub.", "Connesso all'hub."))
-        } else if status != "In connessione…" && status != "Disconnesso" {
+        } else if status != "In connessione…" && status != "Disconnesso" && !status.hasPrefix("Connessione instabile") {
             hubConnectionPending = false
             answer(tr("Could not connect to the hub. Check the hub and the Wi-Fi network.",
                       "Impossibile connettersi all'hub. Controlla l'hub e la rete Wi-Fi."))
