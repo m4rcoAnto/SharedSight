@@ -66,6 +66,12 @@ struct SettingsView: View {
                         "Mentre il bersaglio è nascosto il suo riquadro è una previsione, mostrata tratteggiata, e l'inseguimento è in pausa. Dopo questo tempo viene dichiarato perso. Il registro contiene solo i cambi di stato del bersaglio (testo, nessuna immagine) ed è salvato su questo iPhone."))
                 }
                 Section {
+                    Button { model.startHubScan() } label: {
+                        Label(model.tr("Scan QR code", "Scansiona codice QR"), systemImage: "qrcode.viewfinder")
+                    }
+                    .disabled(model.serverOn)
+                    .accessibilityHint(model.tr("Reads the server address and key from the QR code on the hub screen, then connects.",
+                                                "Legge l'indirizzo e la chiave del server dal codice QR sullo schermo dell'hub, poi si connette."))
                     TextField("URL server (http://IP-MAC:8080)", text: $model.serverURL)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .disabled(model.serverOn)
@@ -110,6 +116,9 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle(model.tr("Settings", "Impostazioni"))
+            .sheet(isPresented: Binding(get: { model.hubScanning }, set: { if !$0 { model.cancelHubScan() } })) {
+                HubScanSheet().environmentObject(model)
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button(model.tr("Done", "Fine")) { dismiss() } }
@@ -120,5 +129,41 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+}
+
+/// Scans the hub's QR code with the camera frames the app is already receiving (no second camera session).
+/// Usable without sight: one spoken instruction, one Cancel button, and the result is announced.
+private struct HubScanSheet: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                if let preview = model.snapshot.preview {
+                    Image(decorative: preview, scale: 1)
+                        .resizable().scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(.system(size: 96)).frame(maxHeight: .infinity)
+                        .accessibilityHidden(true)
+                }
+                Text(model.tr("Point the camera at the QR code on the hub screen.", "Inquadra il codice QR sullo schermo dell'hub."))
+                    .font(.title3).multilineTextAlignment(.center)
+                Text(model.tr("Looking for the code…", "Ricerca del codice…"))
+                    .foregroundStyle(.secondary)
+                Button(role: .cancel) { model.cancelHubScan() } label: {
+                    Text(model.tr("Cancel", "Annulla")).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+                .accessibilityHint(model.tr("Stops scanning and goes back to Settings.", "Interrompe la scansione e torna alle Impostazioni."))
+            }
+            .padding()
+            .navigationTitle(model.tr("Scan hub code", "Leggi codice hub"))
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .interactiveDismissDisabled(false)
     }
 }

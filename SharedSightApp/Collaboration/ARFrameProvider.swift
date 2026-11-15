@@ -126,7 +126,31 @@ final class ARFrameProvider: NSObject, CameraFrameProviding, ARSessionDelegate {
                 let t = hit.worldTransform.columns.3, n = hit.worldTransform.columns.1      // y axis = surface normal
                 return (Vec3(Double(t.x), Double(t.y), Double(t.z)), Vec3(Double(n.x), Double(n.y), Double(n.z)))
             },
-            floorY: floorY)
+            floorY: floorY,
+            wallDistance: { [weak session] offsetDeg in
+                guard let session else { return nil }
+                let t = camera.transform
+                let origin = simd_float3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+                // The camera looks along its -Z. Flattened to the floor plane it is the heading; with the phone
+                // pointing at the floor or the ceiling there is no heading, and nothing is measured.
+                var heading = simd_float3(-t.columns.2.x, 0, -t.columns.2.z)
+                let length = simd_length(heading)
+                guard length > 0.35 else { return nil }
+                heading /= length
+                let a = Float(offsetDeg * .pi / 180), c = cos(a), s = sin(a)
+                let direction = simd_float3(heading.x * c + heading.z * s, 0, -heading.x * s + heading.z * c)
+                // Real plane geometry first, then ARKit's estimate. Never a plane continued beyond its mapped edge:
+                // that would put a wall across a doorway.
+                for target in [ARRaycastQuery.Target.existingPlaneGeometry, .estimatedPlane] {
+                    let query = ARRaycastQuery(origin: origin, direction: direction, allowing: target, alignment: .vertical)
+                    guard let hit = session.raycast(query).first else { continue }
+                    let p = hit.worldTransform.columns.3, n = hit.worldTransform.columns.1
+                    guard abs(n.y) < 0.35 else { continue }
+                    let d = Double(simd_length(simd_float3(p.x - origin.x, 0, p.z - origin.z)))
+                    if d > 0.15, d < 8 { return d }
+                }
+                return nil
+            })
         delegate?.frameProvider(didOutput: CameraFrame(pixelBuffer: image, timestamp: frame.timestamp, orientation: .right,
                                                        uprightSize: CGSize(width: h, height: w), horizontalFOVDeg: fov, spatial: info))
     }

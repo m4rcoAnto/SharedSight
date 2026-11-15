@@ -23,6 +23,10 @@ struct SpatialFrameInfo {
     var surfacePoint: ((_ x: Double, _ y: Double) -> (point: Vec3, normal: Vec3)?)? = nil
     /// Height of the floor (lowest detected horizontal plane classified as floor, else lowest horizontal plane).
     var floorY: Double? = nil
+    /// Horizontal distance in metres from the camera to the nearest vertical surface (a detected plane's own
+    /// geometry, else ARKit's estimated plane) along a level ray: the camera's heading turned by `offsetDeg`
+    /// (positive = to the left). Needs no LiDAR. Nil = nothing measured, which is not the same as free space.
+    var wallDistance: ((_ offsetDeg: Double) -> Double?)? = nil
 }
 
 struct CameraFrame {

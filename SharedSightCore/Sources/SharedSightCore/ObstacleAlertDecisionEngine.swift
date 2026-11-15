@@ -25,6 +25,8 @@ public enum AlertKind: Equatable, Sendable {
     case hiddenEstimate(label: String, occluder: OccluderKind?)
     case encounter(label: String, predicted: Bool, remote: Bool, hidden: Bool, imminent: Bool)
     case localizationLost(label: String)
+    /// A vertical surface measured straight ahead of the camera. `roomSide` comes from the side rays only.
+    case wallAhead(stop: Bool, roomSide: Sector?)
     case system(SystemNotice)
 }
 
@@ -181,7 +183,8 @@ public final class ObstacleAlertDecisionEngine {
 
     public func decide(local: [LocalCandidate], peers: [ResolvedPeerObservation] = [], hidden: [HiddenReport] = [],
                        reliability: ReliabilityReport, events: [SystemNotice] = [],
-                       preferences: AlertPreferences = AlertPreferences(), encounters: [EncounterResult] = [], epoch: String = "local", now: Timestamp) -> [AlertIntent] {
+                       preferences: AlertPreferences = AlertPreferences(), encounters: [EncounterResult] = [], wall: WallAlert? = nil,
+                       epoch: String = "local", now: Timestamp) -> [AlertIntent] {
         if self.epoch != epoch { reset(); self.epoch = epoch }
         validatedAt = now
         let context = Context(local: local, peers: peers, hidden: hidden, encounters: encounters,
@@ -224,6 +227,16 @@ public final class ObstacleAlertDecisionEngine {
         }
         lastSemantic = semantic.state
         for e in events { system(e, e == .peerLost ? 75 : 65) }
+
+        // 1b. A wall measured straight ahead. Urgent: it interrupts ordinary object announcements, and only an
+        // imminent encounter outranks it. The measurement is this frame's; an undelivered one expires within a second.
+        if let wall {
+            let intent = AlertIntent(kind: .wallAhead(stop: wall.stop, roomSide: wall.roomSide), sector: .ahead,
+                                     distance: DistanceMeasurement(meters: wall.meters, sigma: 0.15 + 0.05 * wall.meters, method: .surfaceRaycast),
+                                     source: .localCamera, priority: wall.stop ? 105 : 95, interrupts: true, evidenceTimestamp: now)
+            if let staged = stage(intent, key: "wall", now: now, replace: true, check: { c in c.now - now <= 1.5 },
+                                  commit: { _ in }) { out.append(staged) }
+        }
 
         // 2. Local, directly observed obstacles. Suppressed entirely while perception is unavailable.
         if semantic.state != .unavailable {

@@ -127,6 +127,7 @@ final class AudioFeedbackEngine: NSObject, AVSpeechSynthesizerDelegate {
             switch item.intent.kind {
             case .system(.perceptionUnavailable): notificationHaptic.notificationOccurred(.error)
             case .obstacle where item.intent.sector == .ahead: heavyHaptic.impactOccurred()
+            case .wallAhead: heavyHaptic.impactOccurred()
             case .peerObstacle, .hiddenSeenByOther, .encounter: mediumHaptic.impactOccurred()
             default: break
             }

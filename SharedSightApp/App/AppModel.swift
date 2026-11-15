@@ -34,6 +34,66 @@ final class AppModel: ObservableObject {
                                session: sessionCode, previews: serverPreviews)
     }
 
+    // MARK: Hub QR code
+
+    /// True while the camera frames the app already receives are being searched for the hub's QR code.
+    @Published private(set) var hubScanning = false
+    private var hubConnectionPending = false
+
+    func startHubScan() {
+        guard !serverOn, !hubScanning else { return }
+        guard !paused else {
+            answer(tr("Perception is paused. Resume it to scan the hub code.", "La percezione è in pausa. Riprendila per leggere il codice dell'hub."))
+            return
+        }
+        hubScanning = true
+        updatePreviewMode()
+        engine.onHubLink = { [weak self] link in self?.hubLinkScanned(link) }
+        engine.setHubScan(true)
+        // After the sheet has appeared, so VoiceOver's own screen-change speech does not swallow it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.hubScanning else { return }
+            self.answer(self.tr("Point the camera at the QR code on the hub screen.", "Inquadra il codice QR sullo schermo dell'hub."))
+        }
+    }
+
+    func cancelHubScan() {
+        guard hubScanning else { return }
+        hubScanning = false
+        engine.setHubScan(false)
+        updatePreviewMode()
+    }
+
+    private func hubLinkScanned(_ link: HubLink) {
+        guard hubScanning, !serverOn else { return }
+        hubScanning = false
+        updatePreviewMode()
+        serverURL = link.url
+        serverToken = link.token
+        if let session = link.session { sessionCode = session }
+        hubConnectionPending = true
+        toggleServer()
+        if haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.hubConnectionPending else { return }
+            self.answer(self.tr("Hub code read. Connecting to the hub.", "Codice dell'hub letto. Connessione all'hub in corso."))
+        }
+    }
+
+    /// After a scan: says "connected" only once the hub has really answered, and says so when it has not.
+    private func announceHubConnection(_ status: String) {
+        guard hubConnectionPending else { return }
+        guard serverOn else { hubConnectionPending = false; return }
+        if status == "Connesso" {
+            hubConnectionPending = false
+            answer(tr("Connected to the hub.", "Connesso all'hub."))
+        } else if status != "In connessione…" && status != "Disconnesso" {
+            hubConnectionPending = false
+            answer(tr("Could not connect to the hub. Check the hub and the Wi-Fi network.",
+                      "Impossibile connettersi all'hub. Controlla l'hub e la rete Wi-Fi."))
+        }
+    }
+
     /// ARKit world tracking: distances, positions on the floor, hidden-object estimates and encounter risk all need it.
     /// On by default wherever it is supported; the choice is remembered.
     @Published var spatialMode: Bool {
@@ -129,6 +189,7 @@ final class AppModel: ObservableObject {
 
     private func receive(_ s: Snapshot) {
         snapshot = s
+        announceHubConnection(s.serverStatus)
         // When speech is muted, VoiceOver users still get perception state changes.
         let state = s.reliability.status(.semanticDetection).state
         if state != lastSemanticState, lastSemanticState != nil, !audioOn, UIAccessibility.isVoiceOverRunning {
@@ -257,7 +318,8 @@ final class AppModel: ObservableObject {
     }
 
     private func updatePreviewMode() {
-        engine.previewEnabled = diagnosticsVisible || spatialMode   // ARKit mode has no preview layer: frames from the engine
+        // ARKit mode has no preview layer: frames from the engine. The QR scanner shows the same frames.
+        engine.previewEnabled = diagnosticsVisible || spatialMode || hubScanning
         engine.masksWanted = diagnosticsVisible || showOutlines
     }
 

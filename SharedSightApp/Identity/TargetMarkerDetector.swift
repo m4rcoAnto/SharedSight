@@ -18,6 +18,15 @@ final class TargetMarkerDetector {
         request.symbologies = [.qr]
     }
 
+    /// Hub connection codes only (`sharedsight://hub?...`), read while the user is scanning the hub's QR code.
+    /// Every other payload is discarded here.
+    func hubLinks(_ frame: CameraFrame) -> [HubLink] {
+        do {
+            try VNImageRequestHandler(cvPixelBuffer: frame.pixelBuffer, orientation: frame.orientation, options: [:]).perform([request])
+        } catch { return [] }
+        return (request.results ?? []).compactMap { $0.payloadStringValue.flatMap(HubLinkPayload.parse) }
+    }
+
     func detect(_ frame: CameraFrame) -> [MarkerSighting] {
         let start = CACurrentMediaTime()
         defer { lastLatency = CACurrentMediaTime() - start }

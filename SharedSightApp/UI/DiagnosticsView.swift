@@ -68,6 +68,7 @@ struct DiagnosticsView: View {
                     row("boundingBoxArea / relative to lock", g.boundingBoxArea.map { a in String(format: "%.4f / %@", a, g.relativeSize.map { String(format: "%.2f", $0) } ?? "n/a") } ?? "none")
                     row("Follow cue (SIMULATED, no vehicle)", g.hold.map { "HOLD: \($0.rawValue)" } ?? "\(g.horizontal.rawValue) / \(g.vertical.rawValue) / size \(g.size.rawValue)")
                     row("Marker read latency", String(format: "%.1f ms", s.metrics.markerMs))
+                    row("Wall distance", s.wallSource)
                     row("Marker read error", s.markerError ?? "none")
                 }
                 Section("Target events (stored locally, \(model.trackingEvents.count))") {

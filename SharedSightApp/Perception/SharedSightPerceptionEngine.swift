@@ -57,6 +57,8 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
         var captureSession: AVCaptureSession?
         var arSession: ARSession?
         var imageAspect = 9.0 / 16.0          // width / height of the upright camera image
+        /// Where the wall-ahead distance currently comes from: "LiDAR depth", "plane raycast" or "not measured".
+        var wallSource = "not measured"
     }
 
     // Modules
@@ -101,6 +103,8 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
     var onSnapshot: ((Snapshot) -> Void)?
     /// Target state changes, delivered on the main thread, for the local diagnostics log.
     var onTargetEvents: (([TargetEvent]) -> Void)?
+    /// A hub connection code was read while scanning was on. Delivered once, on the main thread; scanning then stops.
+    var onHubLink: ((HubLink) -> Void)?
     var previewEnabled = false
     /// Instance masks are only drawn (outlines, Diagnostics). When nobody shows them they are not decoded at all.
     var masksWanted = false
@@ -147,6 +151,11 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
     private var postedAligned: Bool?
     private var lastFOV = 55.0
     private var lastScan: Timestamp = -.infinity
+    private var hubScan = false
+    private var wallMonitor = WallProximityMonitor()
+    private var pendingWall: WallAlert?
+    private var lastWallProbe: Timestamp = -.infinity
+    private var wallSource = "not measured"
 
     // MARK: Lifecycle (call from the main thread)
 
@@ -189,6 +198,9 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
     }
 
     func setPreferences(_ p: AlertPreferences) { work.async { self.preferences = p } }
+
+    /// While on, the frames the app already receives are also searched for the hub's QR code. No second camera.
+    func setHubScan(_ on: Bool) { work.async { self.hubScan = on } }
 
     /// Switches between the AVFoundation provider and the ARKit provider (needed for any metric / shared-space claim).
     func setSpatialMode(_ on: Bool) {
@@ -263,6 +275,55 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
         lastFrameTime = nil; lastSpatial = nil; quality = nil; reading = nil
         groundMemory.reset(); hiddenEstimates = []; hidden = []; hiddenInvalidations = [:]
         planeSignature = 0; postedAligned = nil; server.forcePlanes()
+        wallMonitor.reset(); pendingWall = nil; wallSource = "not measured"
+    }
+
+    /// LiDAR only: horizontal distance to what the depth map shows at about camera height in the given image
+    /// columns (upright, 0 = left edge). Floor and ceiling points are left out; nil when too few samples remain.
+    private func depthDistance(_ spatial: SpatialFrameInfo, columns: [Double]) -> Double? {
+        guard let depth = spatial.depthPoint else { return nil }
+        let eye = spatial.worldFromCamera.translation
+        // A person or a vehicle is not a wall: depth inside a tracked mover's box (as of the previous frame) is left out.
+        let movers = entries.filter { $0.isCurrentEvidence && NominalSize.isMover($0.track.label) }.map(\.track.box)
+        var values: [Double] = []
+        for x in columns {
+            for y in [0.42, 0.5] {
+                if movers.contains(where: { x >= $0.x && x <= $0.maxX && y >= $0.y && y <= $0.maxY }) { continue }
+                guard let p = depth(x, y), abs(p.y - eye.y) < 0.6 else { continue }
+                var d = p - eye; d.y = 0
+                if d.length > 0.15 { values.append(d.length) }
+            }
+        }
+        guard values.count >= 2 else { return nil }
+        values.sort()
+        return values[(values.count - 1) / 2]
+    }
+
+    /// Wall ahead, from measurements only. LiDAR depth where the phone has it (an opening is where the depth is
+    /// greater than beside it); otherwise level rays against vertical planes. No tracking, no claim.
+    private func probeWalls(_ frame: CameraFrame) {
+        guard let spatial = frame.spatial, spatial.trackingNormal else {
+            wallMonitor.reset(); pendingWall = nil; wallSource = "not measured"
+            return
+        }
+        guard frame.timestamp - lastWallProbe >= 0.1 else { return }
+        lastWallProbe = frame.timestamp
+        var reading = WallReading(forward: nil, planesTracked: spatial.planes.contains(where: \.vertical))
+        if let forward = depthDistance(spatial, columns: [0.4, 0.5, 0.6]) {
+            reading.forward = forward
+            wallSource = "LiDAR depth"
+            if forward <= 2.5 {     // the sides matter only near a wall; as wide as the picture allows
+                reading.left = depthDistance(spatial, columns: [0.08, 0.18])
+                reading.right = depthDistance(spatial, columns: [0.82, 0.92])
+            }
+        } else if let ray = spatial.wallDistance, let forward = ray(0) {
+            reading.forward = forward
+            wallSource = "plane raycast"
+            if forward <= 2.5 { reading.left = ray(35); reading.right = ray(-35) }
+        } else {
+            wallSource = "not measured"
+        }
+        pendingWall = wallMonitor.update(reading, now: frame.timestamp)
     }
 
     // MARK: Collaboration plumbing (on `work`)
@@ -329,6 +390,11 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
             sightings = markerDetector.detect(frame)
             metrics.markerMs = ema(metrics.markerMs, markerDetector.lastLatency * 1000)
         }
+        if hubScan, !covered, frameIndex % 2 == 0, let link = markerDetector.hubLinks(frame).first {
+            hubScan = false
+            DispatchQueue.main.async { self.onHubLink?(link) }
+        }
+        probeWalls(frame)
         userMotion.update(pose: frame.spatial?.trackingNormal == true ? frame.spatial?.worldFromCamera : nil, time: frame.timestamp)
         lastTracks = tracks
         targetManager.update(tracks: tracks, markers: sightings, now: frame.timestamp)
@@ -398,6 +464,7 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
         kept?.groundPoint = { _, _ in nil }
         kept?.depthPoint = nil
         kept?.surfacePoint = nil
+        kept?.wallDistance = nil
         lastSpatial = kept
 
         if let o = output, !covered {
@@ -602,7 +669,9 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
         }
 
         let intents = alerts.decide(local: candidates, peers: peers, hidden: hidden, reliability: report, events: events,
-                                    preferences: preferences, encounters: encounters, epoch: serverEpoch, now: now)
+                                    preferences: preferences, encounters: encounters, wall: paused ? nil : pendingWall,
+                                    epoch: serverEpoch, now: now)
+        pendingWall = nil
         let validation = alerts.validationSnapshot
         DispatchQueue.main.async {
             self.audio.updateValidation(validation)
@@ -637,6 +706,7 @@ final class SharedSightPerceptionEngine: CameraFrameProviderDelegate {
         s.lastSpoken = lastSpoken; s.audioReady = audio.ready; s.preview = preview
         s.target = targetStatus; s.guidance = guidance; s.trackingArmed = targetManager.isArmed
         s.markerError = markerDetector.lastError
+        s.wallSource = wallSource
         s.captureSession = provider.captureSession; s.arSession = provider.arSession; s.imageAspect = imageAspect
         DispatchQueue.main.async { self.onSnapshot?(s) }
     }

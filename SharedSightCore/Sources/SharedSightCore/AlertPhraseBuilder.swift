@@ -136,6 +136,19 @@ public struct AlertPhraseBuilder: Sendable {
                 return "Non riesco più a localizzare " + (vehicle ? "il veicolo" : noun(label)) + ". Il rischio non è escluso."
             }
             return "I can no longer locate the " + (vehicle ? "vehicle" : noun(label)) + ". Risk is not ruled out."
+        case let .wallAhead(stop, roomSide):
+            // Only what was measured: the distance ahead and, at most, which side ray measured more room.
+            // Never an instruction ("go left") and never a statement that a side is clear, free or safe.
+            let en = language == .english
+            var text = (stop ? (en ? "Stop. " : "Fermati. ") : "") + (en ? "Wall ahead" : "Parete davanti")
+            if let dist = distance(intent.distance) { text += ", " + dist }
+            text += "."
+            switch roomSide {
+            case .left?: text += en ? " More room measured on the left." : " Più spazio misurato a sinistra."
+            case .right?: text += en ? " More room measured on the right." : " Più spazio misurato a destra."
+            default: break
+            }
+            return text
         case let .system(notice):
             return systemPhrase(notice)
         }
