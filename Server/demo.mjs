@@ -19,7 +19,7 @@ if (!url) {
   url = `http://127.0.0.1:${port}`;
 } else if (!token) { console.error('Imposta SHAREDSIGHT_TOKEN alla chiave mostrata dal server.'); process.exit(1); }
 
-const scenario = createScenario({ phones });
+const scenario = createScenario({ phones, reveal: false, noise: 0.35 });
 const open = `${hub ? `http://localhost:${port}` : url}/#token=${token}&session=DEMO`;
 console.log(`\nDEMO SIMULATA · ${scenario.phones.length} iPhone virtual${scenario.phones.length === 1 ? 'e' : 'i'} · sessione DEMO · ${rate} invii/s ciascuno`);
 console.log(`Apri: ${open}`);

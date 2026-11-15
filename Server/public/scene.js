@@ -4,6 +4,7 @@
 // Smoothness: nothing is rebuilt per update. Objects persist and are moved; the hub's 30 Hz states are buffered
 // and interpolated at display rate with a short delay, and extrapolated with their velocity when a state is late.
 import * as THREE from 'three';
+import { forecastMotion } from '/demo-motion.mjs';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createModel } from '/models.js';
 import { classInfo } from '/shared/classes.mjs';
@@ -159,7 +160,8 @@ export class SceneView {
     this.walls = []; this.wallViews = []; this.floorMeshes = []; this.shadeMeshes = [];
     const planes = [...this.surfaces.values()].filter(s => s.space === this.space).flatMap(s => s.planes);
     const room = this.rooms.get(this.space);
-    if (room) return this.buildRoom(room, planes);
+    if (room && !this.options.demo) return this.buildRoom(room, planes);
+    this.tables = [];
     const horizontals = planes.filter(p => !p.vertical && p.triangles.length), verticals = planes.filter(p => p.vertical);
     const heights = horizontals.map(p => p.vertices.reduce((s, v) => s + v.y, 0) / p.vertices.length);
     const floors = heights.filter((h, i) => horizontals[i].kind === 'floor');
@@ -490,7 +492,7 @@ export class SceneView {
       v.ring.visible = v.disc.visible = v.ring.material.opacity > 0.01;
       v.ring.position.set(v.x, v.y + 0.02, v.z); v.disc.position.set(v.x, v.y + 0.018, v.z); v.ring.scale.setScalar(v.sigma); v.disc.scale.setScalar(v.sigma);
 
-      if (e.path && !v.gone) {
+      if (e.path && !v.gone && !this.options.demo) {
         const p = v.path.geometry.getAttribute('position'), d = v.path.geometry.getAttribute('lineDistance');
         let i = 0, px = v.x, pz = v.z, run = 0; p.setXYZ(i, px, v.y + 0.04, pz); d.setX(i++, 0);
         for (let j = 0; j + 1 < e.path.length && i < 5; j += 2) {
@@ -503,7 +505,7 @@ export class SceneView {
 
       // Movers and estimates are always named; furniture in plain view is named once the viewer zooms in.
       // Cloud of possible positions while hidden: fainter as it spreads.
-      const pts = estimate && !v.gone && e.cloud?.length ? e.cloud : null;
+      const pts = !this.options.demo && estimate && !v.gone && e.cloud?.length ? e.cloud : null;
       v.cloud.visible = !!pts;
       if (pts) {
         const arr = v.cloud.geometry.attributes.position.array, n = Math.min(pts.length, 64);
@@ -574,6 +576,7 @@ export class SceneView {
       }
     }
 
+    this.drawDemoMotion(now);
     this.renderer.render(this.scene, this.camera);
 
     // Adaptive quality: hold the frame rate before holding the effects.
@@ -584,6 +587,34 @@ export class SceneView {
       this.resize();
     }
     if (now - this.statAt > 500) { this.onStats({ fps: Math.round(this.frames * 1000 / (now - this.statAt)), quality: this.quality }); this.frames = 0; this.statAt = now; }
+  }
+
+  drawDemoMotion(now) {
+    if (!this.demoLines) { this.demoLines = new Map(); }
+    if (now - (this.demoAt ?? -Infinity) < 150) return;
+    this.demoAt = now;
+    const forecasts = this.options.demo ? forecastMotion([...this.entities.values()].filter(v => !v.gone).map(v => v.data), this.walls ?? []) : [];
+    this.demoForecasts = forecasts;
+    const ids = new Set(forecasts.map(f => f.id));
+    for (const [id, line] of this.demoLines) if (!ids.has(id)) {
+      this.scene.remove(line); line.userData.contact?.geometry.dispose(); line.userData.contact?.material.dispose(); line.geometry.dispose(); line.material.dispose(); this.demoLines.delete(id);
+    }
+    for (const f of forecasts) {
+      let line = this.demoLines.get(f.id);
+      if (!line) {
+        line = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ depthTest: false }));
+        line.renderOrder = 10; this.scene.add(line); this.demoLines.set(f.id, line);
+      }
+      line.geometry.dispose();
+      line.geometry = new THREE.BufferGeometry().setFromPoints(f.points.map(([x,z]) => new THREE.Vector3(x, (this.floorY ?? 0) + 0.07, z)));
+      line.material.color.setHex(f.hit ? 0xd64032 : 0x236fc2);
+      if (!line.userData.contact) {
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.12, 0.18, 32), new THREE.MeshBasicMaterial({ color: 0xd64032, side: THREE.DoubleSide, depthTest: false }));
+        marker.rotation.x = -Math.PI / 2; marker.renderOrder = 11; line.add(marker); line.userData.contact = marker;
+      }
+      line.userData.contact.visible = !!f.hit;
+      if (f.hit) line.userData.contact.position.set(f.hit.x, (this.floorY ?? 0) + 0.08, f.hit.z);
+    }
   }
 
   /** Furniture has no measured orientation: stand it with its back to the nearest wall, else facing the room's middle. */

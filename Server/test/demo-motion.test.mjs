@@ -1,0 +1,10 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { forecastMotion } from '../public/demo-motion.mjs';
+const person = {id:'a',label:'person',x:0,z:0,y:0,h:1.7,w:0.4,vx:1,vz:0,state:'observed'};
+test('forecast stops before a wall',()=>{ const [f]=forecastMotion([person],[{ax:2,az:-2,bx:2,bz:2,y0:0,y1:3}]); assert.ok(f.hit.t>1.6 && f.hit.t<1.8); assert.ok(f.points.at(-1)[0]<2); });
+test('furniture is an obstacle',()=>{assert.equal(forecastMotion([person,{...person,id:'chair',label:'chair',x:2,vx:0}])[0].hit.label,'chair');});
+test('moving subjects meet using relative velocity',()=>{assert.ok(forecastMotion([person,{...person,id:'b',x:4,vx:-1}])[0].hit.t<2);});
+test('lost tracks do not block and overhead lintels allow passage',()=>{const [f]=forecastMotion([person,{...person,id:'b',x:1,state:'lost'}],[{ax:1,az:-1,bx:1,bz:1,y0:2.1,y1:3}]);assert.equal(f.hit,null);assert.equal(f.points.at(-1)[0],3);});
+test('stationary subjects have no trajectory',()=>assert.deepEqual(forecastMotion([{...person,vx:0}]),[]));
+test('parallel motion does not cause a false collision',()=>assert.equal(forecastMotion([person,{...person,id:'b',z:2}])[0].hit,null));
