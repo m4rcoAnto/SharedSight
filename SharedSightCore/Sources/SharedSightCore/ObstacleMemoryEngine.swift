@@ -47,7 +47,11 @@ public final class ObstacleMemoryEngine {
                 let holding = previous.map { $0.state == .reacquired && now - $0.since < config.reacquiredHold } ?? false
                 state = (wasAway || holding) ? .reacquired : .observed
             } else {
-                let occluded = observedBoxes.contains { $0.id != t.id && t.box.coveredFraction(by: $0.box) >= config.occlusionCover }
+                // Hidden behind something only if that something is nearer: its bottom edge is not higher in the image.
+                // (A far object overlapping the box cannot hide it.) The tracker's own occlusion estimate counts too.
+                let occluded = t.occlusion >= config.occlusionCover || observedBoxes.contains {
+                    $0.id != t.id && $0.box.maxY >= t.box.maxY - 0.02 && t.box.coveredFraction(by: $0.box) >= config.occlusionCover
+                }
                 let inFrame = (0.0...1.0).contains(t.box.cx) && (0.0...1.0).contains(t.box.cy)
                 if age <= config.hiddenGrace || (occluded && age <= config.hiddenMax) {
                     state = .temporarilyHidden

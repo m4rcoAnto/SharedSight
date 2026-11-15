@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shared Sight · Stanza condivisa</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%232b2824'/%3E%3Cpath d='M8 8L16 3v10z' fill='%23c8644a'/%3E%3C/svg%3E"><link rel="stylesheet" href="/style.css">
+<script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/controls/OrbitControls.js":"/vendor/OrbitControls.js","three/addons/geometries/RoundedBoxGeometry.js":"/vendor/RoundedBoxGeometry.js"}}</script></head>
+<body>
+<header>
+  <a class="brand" href="/" aria-label="Shared Sight, pagina iniziale"><span class="mark" aria-hidden="true"></span>Shared Sight <span class="sub">stanza condivisa</span></a>
+  <form id="connect" aria-label="Connessione al server">
+    <label>Chiave<input id="token" type="password" placeholder="mostrata nel terminale" required autocomplete="off"></label>
+    <label>Sessione<input id="session" value="1234" maxlength="100" required></label>
+    <button id="connectButton">Connetti</button>
+  </form>
+  <span id="connection" class="status" role="status">Non connesso</span>
+</header>
+
+<main>
+  <section class="stage" aria-label="Ricostruzione 3D">
+    <div id="viewport" role="img" aria-label="Vista tridimensionale della stanza. L'elenco a fianco descrive gli stessi oggetti a parole.">
+      <div id="stale" role="alert" hidden>Il server sta eseguendo una versione precedente del codice. Fermalo con Ctrl+C e riavvialo: <code>npm --prefix Server start</code></div>
+      <div id="empty"><h2>In attesa del primo iPhone</h2><p>Avvia l'app, apri Impostazioni → Stanza 3D e inserisci URL e chiave.<br>Oppure avvia la simulazione: <code>npm run demo</code></p></div>
+      <div class="chips" aria-live="off">
+        <span class="chip"><b id="deviceCount">0</b> iPhone</span>
+        <span class="chip"><b id="objectCount">0</b> oggetti</span>
+        <span class="chip" title="Dalla cattura sul telefono all'arrivo sul server"><b id="latency">—</b> cattura→server</span>
+        <span class="chip" title="Aggiornamenti del modello ricevuti al secondo · fotogrammi disegnati al secondo"><b id="rates">—</b></span>
+      </div>
+      <div class="tools">
+        <select id="space" aria-label="Spazio da visualizzare"><option value="">Spazio condiviso</option></select>
+        <button type="button" id="zones" aria-pressed="true" title="Scurisce il pavimento che nessun iPhone sta vedendo">Zone d'ombra</button>
+        <button type="button" id="labels" aria-pressed="true">Etichette</button>
+        <button type="button" id="top">Dall'alto</button>
+        <button type="button" id="reset">Visuale</button>
+      </div>
+      <div class="legend" aria-hidden="true">
+        <span><i class="solid"></i>visto ora</span><span><i class="ghost"></i>stimato (nessuno lo vede)</span><span><i class="shade"></i>zona d'ombra</span><span><i class="inferred"></i>parete stimata (non ancora vista)</span>
+      </div>
+    </div>
+  </section>
+
+  <aside>
+    <section aria-labelledby="h-objects"><h2 id="h-objects">Oggetti <span id="trackCount" class="count">0</span></h2>
+      <ul id="tracks" class="tracks"><li class="quiet">Nessun oggetto.</li></ul></section>
+    <section aria-labelledby="h-events"><h2 id="h-events">Passaggi tra iPhone</h2>
+      <ol id="events" class="events" aria-live="polite"><li class="quiet">Quando un oggetto esce dalla vista di un iPhone ed entra in quella di un altro, compare qui.</li></ol></section>
+  </aside>
+
+  <section class="cameras-section" aria-labelledby="h-cameras"><h2 id="h-cameras">Prospettive <span id="cameraTotal" class="count">0</span></h2>
+    <div id="cameras" class="cameras"><p class="quiet">Ogni iPhone collegato mostra qui ciò che rileva.</p></div></section>
+</main>
+<footer>Posizioni misurate dagli iPhone e fuse sul server · le sagome illustrano la classe dell'oggetto, non la sua forma · mai un'indicazione di “via libera”.</footer>
+<script type="module" src="/app.js"></script></body></html>

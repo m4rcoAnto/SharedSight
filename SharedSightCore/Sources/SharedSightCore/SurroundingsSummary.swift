@@ -31,11 +31,33 @@ public struct PeerSurroundingsItem: Sendable, Equatable {
 /// 4. A direction or distance is spoken only when the item carries one. Expired peer observations are never spoken.
 extension AlertPhraseBuilder {
     public func surroundings(perception: ReliabilityState, local: [SurroundingsItem], peers: [PeerSurroundingsItem],
-                             maxItems: Int = 4) -> String {
+                             hidden: [HiddenReport] = [], maxItems: Int = 4) -> String {
         let en = language == .english
+        // People, animals and vehicles first, then the nearest; furniture another phone sees matters only when close.
+        let located = hidden.filter { $0.sector != nil && ($0.isMover || $0.distance.meters <= 4) }
+            .sorted { ($0.isMover ? 0 : 1, $0.distance.meters) < ($1.isMover ? 0 : 1, $1.distance.meters) }
+        let hiddenSeen = located.filter { !$0.isPrediction }, hiddenGuess = located.filter { $0.isPrediction && $0.isMover }
+        // The heading already says these are out of sight: only a real obstruction (wall, door, object) is named per item.
+        func item(_ r: HiddenReport) -> String { describe(r.label, r.sector, r.distance, place: r.occluder.map { place($0) }) }
+        func hiddenSentences() -> [String] {
+            var s: [String] = []
+            if !hiddenSeen.isEmpty {
+                let head = en ? "Not visible from here, according to another device: " : "Non visibile da qui, secondo un altro dispositivo: "
+                s.append(head + list(hiddenSeen.prefix(maxItems).map(item), extra: hiddenSeen.count - maxItems) + ".")
+            }
+            if !hiddenGuess.isEmpty {
+                let head = en ? "Estimated position, not confirmed: " : "Posizione stimata, non confermata: "
+                s.append(head + list(hiddenGuess.prefix(maxItems).map(item), extra: hiddenGuess.count - maxItems) + ".")
+            }
+            return s
+        }
         if perception == .unavailable {
-            return en ? "Camera perception unavailable. I cannot tell what is around you."
-                      : "Percezione della fotocamera non disponibile. Non posso dirti cosa c'è intorno a te."
+            // This phone's camera cannot help, but what another phone sees is still true and is still said.
+            let head = en ? "Camera perception unavailable. I cannot tell what is around you from this camera."
+                          : "Percezione della fotocamera non disponibile. Da questa fotocamera non posso dirti cosa c'è intorno a te."
+            return ([hiddenSeen.isEmpty ? (en ? "Camera perception unavailable. I cannot tell what is around you."
+                                              : "Percezione della fotocamera non disponibile. Non posso dirti cosa c'è intorno a te.") : head]
+                    + (hiddenSeen.isEmpty ? [] : [hiddenSentences()[0]])).joined(separator: " ")
         }
         var sentences: [String] = []
         if perception == .degraded {
@@ -64,16 +86,19 @@ extension AlertPhraseBuilder {
             sentences.append(head + list(unverifiedPeers.prefix(maxItems).map { noun($0.label) }, extra: unverifiedPeers.count - maxItems) + ".")
         }
 
-        if seen.isEmpty && remembered.isEmpty && verifiedPeers.isEmpty && unverifiedPeers.isEmpty {
+        sentences.append(contentsOf: hiddenSentences())
+
+        if seen.isEmpty && remembered.isEmpty && verifiedPeers.isEmpty && unverifiedPeers.isEmpty && hiddenSeen.isEmpty && hiddenGuess.isEmpty {
             sentences.append(en ? "Nothing I recognise is in view right now. This does not mean the way is clear."
                                 : "In questo momento non riconosco nulla nel campo visivo. Questo non significa che la via sia libera.")
         }
         return sentences.joined(separator: " ")
     }
 
-    private func describe(_ label: String, _ sector: Sector?, _ dist: DistanceMeasurement?) -> String {
+    private func describe(_ label: String, _ sector: Sector?, _ dist: DistanceMeasurement?, place: String? = nil) -> String {
         var parts = [noun(label)]
         if let dir = direction(sector) { parts[0] += " " + dir }
+        if let place { parts.append(place) }
         if let d = distance(dist) { parts.append(d) }
         return parts.joined(separator: ", ")
     }

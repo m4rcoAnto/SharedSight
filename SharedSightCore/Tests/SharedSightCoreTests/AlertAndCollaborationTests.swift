@@ -8,7 +8,7 @@ final class ReliabilityAndAlertTests: XCTestCase {
         let report = PerceptionReliabilityEngine().evaluate(i)
         XCTAssertEqual(report.status(.semanticDetection).state, .unavailable)
         XCTAssertEqual(report.status(.tracking).state, .unavailable)
-        let engine = ObstacleAlertDecisionEngine()
+        let engine = SpokenAlerts()
         let first = engine.decide(local: [candidate(1, now: t0)], reliability: report, now: t0)
         XCTAssertEqual(first.first?.kind, .system(.perceptionUnavailable(.cameraUnavailable)))
         XCTAssertTrue(first.first!.interrupts)
@@ -51,16 +51,16 @@ final class ReliabilityAndAlertTests: XCTestCase {
         XCTAssertEqual(report.status(.sharedSpatialReference).state, .unavailable)
         // A distance attached to a candidate is not spoken while the distance feature is unavailable.
         let d = DistanceMeasurement(meters: 2, sigma: 0.2, method: .groundPlaneRaycast)
-        let intents = ObstacleAlertDecisionEngine().decide(local: [candidate(1, now: t0, distance: d)], reliability: report, now: t0)
+        let intents = SpokenAlerts().decide(local: [candidate(1, now: t0, distance: d)], reliability: report, now: t0)
         XCTAssertNil(obstacleIntents(intents).first?.distance)
         var i = healthyInputs(); i.depthSourceAvailable = true; i.worldTrackingNormal = true
-        let withDepth = ObstacleAlertDecisionEngine().decide(local: [candidate(1, now: t0, distance: d)],
+        let withDepth = SpokenAlerts().decide(local: [candidate(1, now: t0, distance: d)],
                                                              reliability: PerceptionReliabilityEngine().evaluate(i), now: t0)
         XCTAssertEqual(obstacleIntents(withDepth).first?.distance, d)
     }
 
     func testStaleOrPredictedObservationsAreNeverAnnounced() {
-        let engine = ObstacleAlertDecisionEngine(), report = healthyReport()
+        let engine = SpokenAlerts(), report = healthyReport()
         XCTAssertTrue(obstacleIntents(engine.decide(local: [candidate(1, now: t0, age: 1.0)], reliability: report, now: t0)).isEmpty)
         for state in [MemoryState.predicted, .temporarilyHidden, .unknown, .lost] {
             let intents = engine.decide(local: [candidate(2, now: t0 + 1, state: state, age: 0.2)], reliability: report, now: t0 + 1)
@@ -70,7 +70,7 @@ final class ReliabilityAndAlertTests: XCTestCase {
     }
 
     func testAudioDeduplication() {
-        let engine = ObstacleAlertDecisionEngine(), report = healthyReport()
+        let engine = SpokenAlerts(), report = healthyReport()
         var spoken = 0
         for step in 0..<50 {
             let now = t0 + Double(step) * 0.1
@@ -78,21 +78,24 @@ final class ReliabilityAndAlertTests: XCTestCase {
             if step >= 20 { local.append(candidate(2, now: now)) }   // tracker re-issued an ID for the same thing
             spoken += obstacleIntents(engine.decide(local: local, reliability: report, now: now)).count
         }
-        XCTAssertEqual(spoken, 2, "one announcement, plus at most one after the class/sector cooldown for the new ID")
-        let single = ObstacleAlertDecisionEngine()
+        XCTAssertEqual(spoken, 1, "furniture that the tracker renumbers is the same furniture: not announced again within seconds")
+        let single = SpokenAlerts()
         var count = 0
         for step in 0..<50 { let now = t0 + Double(step) * 0.1; count += obstacleIntents(single.decide(local: [candidate(1, now: now)], reliability: report, now: now)).count }
         XCTAssertEqual(count, 1)
     }
 
     func testAlertPriorityAndQueueing() {
-        let engine = ObstacleAlertDecisionEngine(), report = healthyReport()
+        let engine = SpokenAlerts(), report = healthyReport()
         let ahead = candidate(1, "chair", cx: 0.5, now: t0), side = candidate(2, "person", cx: 0.15, now: t0)
         XCTAssertEqual(ahead.relevance.sector, .ahead); XCTAssertEqual(side.relevance.sector, .left)
         let first = obstacleIntents(engine.decide(local: [side, ahead], reliability: report, now: t0))
         XCTAssertEqual(first.count, 1, "one obstacle alert at a time")
         XCTAssertEqual(first[0].kind, .obstacle(label: "chair", count: 1, moving: false))
-        let later = t0 + 2
+        // The less important one follows once the first has been spoken and a pause has passed, not on top of it.
+        XCTAssertTrue(obstacleIntents(engine.decide(local: [candidate(2, "person", cx: 0.15, now: t0 + 2), candidate(1, "chair", cx: 0.5, now: t0 + 2)],
+                                                    reliability: report, now: t0 + 2)).isEmpty)
+        let later = t0 + 4.5
         let second = obstacleIntents(engine.decide(local: [candidate(2, "person", cx: 0.15, now: later), candidate(1, "chair", cx: 0.5, now: later)],
                                                    reliability: report, now: later))
         XCTAssertEqual(second.first?.kind, .obstacle(label: "person", count: 1, moving: false))
@@ -107,7 +110,7 @@ final class ReliabilityAndAlertTests: XCTestCase {
         XCTAssertNil(candidate(1, cx: 0.1, now: t0, camera: down).relevance.sector, "camera pointing at the floor: no left/right wording")
         // Even if a sector was estimated, an unavailable direction feature strips it.
         var i = healthyInputs(); i.pitchDeg = nil
-        let intents = obstacleIntents(ObstacleAlertDecisionEngine().decide(local: [candidate(1, cx: 0.5, now: t0)],
+        let intents = obstacleIntents(SpokenAlerts().decide(local: [candidate(1, cx: 0.5, now: t0)],
                                                                            reliability: PerceptionReliabilityEngine().evaluate(i),
                                                                            preferences: AlertPreferences(), now: t0))
         XCTAssertEqual(intents.count, 1)
@@ -126,9 +129,9 @@ final class ReliabilityAndAlertTests: XCTestCase {
         XCTAssertEqual(en.phrase(for: intent(.obstacle(label: "person", count: 1, moving: false), .right)), "Person on your right.")
         XCTAssertEqual(it.phrase(for: intent(.obstacle(label: "chair", count: 1, moving: false), .ahead)), "Sedia davanti.")
         XCTAssertEqual(it.phrase(for: intent(.obstacle(label: "person", count: 2, moving: false), .right)), "2 persone a destra.")
-        XCTAssertEqual(it.phrase(for: intent(.obstacle(label: "chair", count: 1, moving: true), .ahead, 2.1)), "Sedia davanti, a circa 2 metri, in movimento.")
+        XCTAssertEqual(it.phrase(for: intent(.obstacle(label: "chair", count: 1, moving: true), .ahead, 2.1)), "Sedia davanti, 2 metri, in movimento.")
         XCTAssertEqual(en.phrase(for: intent(.peerObstacle(label: "chair"), .left, 1.4)),
-                       "Obstacle reported by another device: chair, on your left, about 1.5 meters.")
+                       "Obstacle reported by another device: chair, on your left, 1.5 meters.")
         XCTAssertEqual(en.phrase(for: intent(.peerObstacle(label: "chair"), nil)), "Obstacle reported by another device: chair.")
     }
 }
@@ -192,7 +195,7 @@ final class CollaborationTests: XCTestCase {
         let report = PerceptionReliabilityEngine().evaluate(i)
         XCTAssertEqual(report.status(.peerLink).state, .reliable)
         XCTAssertEqual(report.status(.sharedSpatialReference).state, .unavailable)
-        XCTAssertTrue(peerIntents(ObstacleAlertDecisionEngine().decide(local: [], peers: r, reliability: report, now: t0 + 0.2)).isEmpty)
+        XCTAssertTrue(peerIntents(SpokenAlerts().decide(local: [], peers: r, reliability: report, now: t0 + 0.2)).isEmpty)
         // Different anchors and sender-without-position are also unverified.
         var other = anchored(now: t0); other.anchorID = "marker-02"
         XCTAssertEqual(b.resolve(spatial: other, now: t0 + 0.2)[0].status, .locationUnverified)
@@ -218,7 +221,7 @@ final class CollaborationTests: XCTestCase {
         XCTAssertEqual(r[0].sector, .right)
         var i = healthyInputs(); i.collaborationEnabled = true; i.peerConnected = true; i.peerLastHeardAge = 0.1
         i.sharedAnchorValid = true; i.worldTrackingNormal = true
-        let engine = ObstacleAlertDecisionEngine()
+        let engine = SpokenAlerts()
         let intents = peerIntents(engine.decide(local: [], peers: r, reliability: PerceptionReliabilityEngine().evaluate(i), now: t0 + 0.2))
         XCTAssertEqual(intents.count, 1)
         XCTAssertEqual(intents[0].source, .peer(cameraID: "cam-a"), "a peer observation is never presented as a local detection")
@@ -245,7 +248,7 @@ final class CollaborationTests: XCTestCase {
         XCTAssertEqual(b.drainEvents(), [.peerLost])
         let r = b.resolve(spatial: anchored(now: t0), now: t0 + 0.3)
         XCTAssertTrue(r.allSatisfy { $0.status == .expired })
-        let intents = ObstacleAlertDecisionEngine().decide(local: [candidate(1, now: t0 + 0.3)], peers: r, reliability: healthyReport(),
+        let intents = SpokenAlerts().decide(local: [candidate(1, now: t0 + 0.3)], peers: r, reliability: healthyReport(),
                                                            events: [.peerLost], now: t0 + 0.3)
         XCTAssertTrue(peerIntents(intents).isEmpty)
         XCTAssertEqual(obstacleIntents(intents).count, 1, "the phone keeps working alone with its own camera")

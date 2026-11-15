@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		5500000000000000000000A0 /* SharedSightCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5500000000000000000000A1 /* SharedSightCore */; };
+		5500000000000000000000B0 /* FieldVisionDroneKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5500000000000000000000B1 /* FieldVisionDroneKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5500000000000000000000A0 /* SharedSightCore in Frameworks */,
+				5500000000000000000000B0 /* FieldVisionDroneKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = SharedSight;
 			packageProductDependencies = (
 				5500000000000000000000A1 /* SharedSightCore */,
+				5500000000000000000000B1 /* FieldVisionDroneKit */,
 			);
 			productName = SharedSight;
 			productReference = 550000000000000000000001 /* SharedSight.app */;
@@ -103,6 +106,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				5500000000000000000000A2 /* XCLocalSwiftPackageReference "SharedSightCore" */,
+				5500000000000000000000B2 /* XCLocalSwiftPackageReference "FieldVisionDroneKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 550000000000000000000005 /* Products */;
@@ -140,13 +144,14 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 358Q5DSR52;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Shared Sight";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Shared Sight uses the rear camera to detect obstacles and describe them with speech. Video is analysed on the device and never leaves it.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Shared Sight uses the local network to exchange obstacle observations with another device you chose to collaborate with.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Shared Sight uses the rear camera to detect obstacles, describe them with speech, and follow a registered person who wears a Shared Sight marker. Video is analysed on device. If you enable the local server and previews, camera images are sent to your server.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Confirms that the owner of this iPhone is starting Drone Companion.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Shared Sight uses the local network to exchange observations with other devices and send room geometry and optional previews to your local server.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Shared Sight uses motion sensors to know how the camera is oriented and moving.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -159,7 +164,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.fieldvision.sharedsight;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marcoantonio.sharedsight1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -174,13 +179,14 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 358Q5DSR52;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Shared Sight";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Shared Sight uses the rear camera to detect obstacles and describe them with speech. Video is analysed on the device and never leaves it.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Shared Sight uses the local network to exchange obstacle observations with another device you chose to collaborate with.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Shared Sight uses the rear camera to detect obstacles, describe them with speech, and follow a registered person who wears a Shared Sight marker. Video is analysed on device. If you enable the local server and previews, camera images are sent to your server.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Confirms that the owner of this iPhone is starting Drone Companion.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Shared Sight uses the local network to exchange observations with other devices and send room geometry and optional previews to your local server.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Shared Sight uses motion sensors to know how the camera is oriented and moving.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -193,7 +199,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.fieldvision.sharedsight;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marcoantonio.sharedsight1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -269,12 +275,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = SharedSightCore;
 		};
+		5500000000000000000000B2 /* XCLocalSwiftPackageReference "FieldVisionDroneKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = FieldVisionDroneKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		5500000000000000000000A1 /* SharedSightCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SharedSightCore;
+		};
+		5500000000000000000000B1 /* FieldVisionDroneKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FieldVisionDroneKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -43,6 +43,39 @@ struct DiagnosticsView: View {
                             "\(p.status.rawValue) \(p.sector?.rawValue ?? "")\(where_) age \(String(format: "%.1fs", p.captureAge)) \(p.unverifiedReason ?? "")")
                     }
                 }
+                Section("Out of sight (\(s.hidden.count)) — hub: \(s.serverStatus) — phones on hub: \(s.hubDevices)") {
+                    ForEach(s.hidden) { h in
+                        let source: String = {
+                            if case let .otherDevice(count) = h.source { return "SEEN_BY_OTHER_DEVICE x\(count)" }
+                            return "ESTIMATE (seen by nobody)"
+                        }()
+                        row("\(h.label) \(h.occluder.map { "behind " + $0.rawValue } ?? "outside view")",
+                            "\(source) \(h.sector?.rawValue ?? "no-direction") \(String(format: "%.1fm±%.1f", h.distance.meters, h.distance.sigma)) age \(String(format: "%.1fs", h.age))")
+                    }
+                    row("Hub round trip", s.hubRoundTripMs.map { String(format: "%.0f ms", $0) } ?? "not connected")
+                }
+                Section("Target — \(s.target.state.rawValue)\(s.trackingArmed ? "" : " (not started)")") {
+                    let t = s.target, g = s.guidance
+                    row("Registered user", t.userID ?? "none")
+                    row("Track", t.trackID.map { String(format: "TRACK-%03d", $0) } ?? "none")
+                    row("Box", t.box == nil ? "none" : (t.boxIsPredicted ? "PREDICTED (not observed)" : "OBSERVED"))
+                    row("Reason", t.reason?.rawValue ?? "none")
+                    row("Verified by", t.verifiedBy?.rawValue ?? "none")
+                    row("Detection / association confidence (heuristic)", String(format: "%.2f / %.2f", t.detectionConfidence, t.associationConfidence))
+                    row("targetVisible", g.targetVisible ? "true" : "false")
+                    row("targetCenterX / Y", g.targetCenterX.map { x in String(format: "%.3f / %.3f", x, g.targetCenterY ?? 0) } ?? "none")
+                    row("horizontalOffset / verticalOffset (smoothed)", String(format: "%+.3f / %+.3f", g.horizontalOffset, g.verticalOffset))
+                    row("boundingBoxArea / relative to lock", g.boundingBoxArea.map { a in String(format: "%.4f / %@", a, g.relativeSize.map { String(format: "%.2f", $0) } ?? "n/a") } ?? "none")
+                    row("Follow cue (SIMULATED, no vehicle)", g.hold.map { "HOLD: \($0.rawValue)" } ?? "\(g.horizontal.rawValue) / \(g.vertical.rawValue) / size \(g.size.rawValue)")
+                    row("Marker read latency", String(format: "%.1f ms", s.metrics.markerMs))
+                    row("Marker read error", s.markerError ?? "none")
+                }
+                Section("Target events (stored locally, \(model.trackingEvents.count))") {
+                    ForEach(model.trackingEvents.suffix(25).reversed()) { e in
+                        row("\(e.date.formatted(date: .omitted, time: .standard))  \(e.kind.rawValue)",
+                            "\(e.userID ?? "-") \(e.trackID.map { String(format: "TRACK-%03d", $0) } ?? "-") \(e.detail ?? "")")
+                    }
+                }
                 Section("Performance (measured on this device, this session)") {
                     let m = s.metrics
                     row("Camera frame rate", String(format: "%.1f fps", m.cameraFPS))

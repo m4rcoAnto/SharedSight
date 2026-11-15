@@ -1,4 +1,5 @@
 import AVFoundation
+import ARKit
 import ImageIO
 import SharedSightCore
 
@@ -9,9 +10,19 @@ struct SpatialFrameInfo {
     var anchorID: String?
     var worldFromAnchor: Pose?
     var anchorFixTime: Timestamp?
+    var planes: [RoomPlane] = []
     var hasSceneDepth: Bool
     /// Intersects the ray through an upright-normalised image point with detected horizontal surfaces.
     var groundPoint: (_ x: Double, _ y: Double) -> Vec3?
+    /// LiDAR (sceneDepth) world point at an upright-normalised image point: median of the confident depths around it,
+    /// up to 5 m. Nil without LiDAR, or where the depth is missing or not confident.
+    var depthPoint: ((_ x: Double, _ y: Double) -> Vec3?)? = nil
+    /// Vertical surface (wall, door, tall furniture) along the ray through an upright-normalised image point:
+    /// world position and surface normal. Depth-assisted on LiDAR phones, feature-based otherwise; nil when ARKit
+    /// finds nothing there. Used to sense walls metres away before a plane has been built.
+    var surfacePoint: ((_ x: Double, _ y: Double) -> (point: Vec3, normal: Vec3)?)? = nil
+    /// Height of the floor (lowest detected horizontal plane classified as floor, else lowest horizontal plane).
+    var floorY: Double? = nil
 }
 
 struct CameraFrame {
@@ -33,6 +44,10 @@ protocol CameraFrameProviding: AnyObject {
     var state: CameraState { get }
     var droppedFrames: Int { get }
     var name: String { get }
+    /// Capture session a preview layer can attach to. Nil when the provider has no AVCaptureSession (ARKit).
+    var captureSession: AVCaptureSession? { get }
+    /// ARKit session a live camera view can attach to (ARKit mode). Nil for the AVFoundation provider.
+    var arSession: ARSession? { get }
     func start()
     func stop()
 }
@@ -48,6 +63,8 @@ final class CameraFrameProvider: NSObject, CameraFrameProviding, AVCaptureVideoD
     }
 
     private let session = AVCaptureSession()
+    var captureSession: AVCaptureSession? { session }
+    var arSession: ARSession? { nil }
     private let sessionQueue = DispatchQueue(label: "sharedsight.camera.session")
     private let videoQueue = DispatchQueue(label: "sharedsight.camera.frames", qos: .userInitiated)
     private var configured = false

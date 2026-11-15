@@ -5,12 +5,13 @@ options:
   deploymentTarget: { iOS: "17.0" }
 packages:
   SharedSightCore: { path: SharedSightCore }
+  FieldVisionDroneKit: { path: FieldVisionDroneKit }
 targets:
   SharedSight:
     type: application
     platform: iOS
     sources: [SharedSightApp]
-    dependencies: [{ package: SharedSightCore }]
+    dependencies: [{ package: SharedSightCore }, { package: FieldVisionDroneKit }]
     info:
       path: Config/Info.generated.plist
       properties:
@@ -18,8 +19,10 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
-        NSCameraUsageDescription: Shared Sight uses the rear camera to detect obstacles and describe them with speech. Video is analysed on the device and never leaves it.
-        NSLocalNetworkUsageDescription: Shared Sight uses the local network to exchange obstacle observations with another device you chose to collaborate with.
+        NSCameraUsageDescription: Shared Sight uses the rear camera to detect obstacles, describe them with speech, and follow a registered person who wears a Shared Sight marker. Video is analysed on device. If you enable the local server and previews, camera images are sent to your server.
+        NSLocalNetworkUsageDescription: Shared Sight uses the local network to exchange observations with other devices and send room geometry and optional previews to your local server.
+        NSFaceIDUsageDescription: Confirms that the owner of this iPhone is starting Drone Companion.
+        NSAppTransportSecurity: { NSAllowsLocalNetworking: true }
         NSBonjourServices: [_sharedsight._tcp, _sharedsight._udp]
     settings:
       base: { SWIFT_VERSION: "5.0", TARGETED_DEVICE_FAMILY: "1", PRODUCT_BUNDLE_IDENTIFIER: com.fieldvision.sharedsight }

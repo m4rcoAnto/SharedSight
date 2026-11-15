@@ -4,108 +4,7 @@ import SharedSightCore
 struct RootView: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
-        if model.onboarded { MainView() } else { OnboardingView() }
-    }
-}
-
-/// The one surface treatment used by every card and button.
-///
-/// iOS 26 and later: Liquid Glass (`glassEffect`), tinted yellow for the primary action, interactive for anything tappable.
-/// Earlier iOS, or when the user has turned on Reduce Transparency or Increase Contrast: the original solid, outlined
-/// surface. A person who needs maximum contrast always gets it; glass is never allowed to cost legibility.
-struct Surface: ViewModifier {
-    var prominent = false
-    var interactive = true
-    var cornerRadius: CGFloat = 18
-
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26, *), !reduceTransparency, contrast != .increased {
-            content.glassEffect(prominent ? Glass.regular.tint(.yellow).interactive(interactive)
-                                          : Glass.regular.interactive(interactive),
-                                in: .rect(cornerRadius: cornerRadius))
-        } else {
-            let shape = RoundedRectangle(cornerRadius: cornerRadius)
-            content
-                .background(prominent ? Color.yellow : Color(white: contrast == .increased ? 0.0 : 0.16), in: shape)
-                .overlay(shape.stroke(Color.white, lineWidth: prominent ? 0 : (contrast == .increased ? 3 : 2)))
-        }
-    }
-}
-
-extension View {
-    func surface(prominent: Bool = false, interactive: Bool = true, cornerRadius: CGFloat = 18) -> some View {
-        modifier(Surface(prominent: prominent, interactive: interactive, cornerRadius: cornerRadius))
-    }
-
-    /// Groups neighbouring glass surfaces so they render and blend as one system. No-op before iOS 26.
-    @ViewBuilder func glassGroup(spacing: CGFloat) -> some View {
-        if #available(iOS 26, *) { GlassEffectContainer(spacing: spacing) { self } } else { self }
-    }
-}
-
-/// Screen background. Glass needs something behind it to refract, so this is a very dark gradient with two soft
-/// glows instead of flat black. It stays dark enough that white text keeps its contrast, and it is flat black
-/// when the user asks for less transparency or more contrast.
-struct Backdrop: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    var body: some View {
-        if reduceTransparency || contrast == .increased {
-            Color.black.ignoresSafeArea()
-        } else {
-            ZStack {
-                LinearGradient(colors: [Color(red: 0.05, green: 0.07, blue: 0.12), .black], startPoint: .top, endPoint: .bottom)
-                RadialGradient(colors: [Color.yellow.opacity(0.16), .clear], center: .topTrailing, startRadius: 0, endRadius: 420)
-                RadialGradient(colors: [Color.blue.opacity(0.22), .clear], center: .bottomLeading, startRadius: 0, endRadius: 460)
-            }
-            .ignoresSafeArea()
-            .accessibilityHidden(true)
-        }
-    }
-}
-
-/// Large, high-contrast, label-first button used everywhere.
-///
-/// Sighted and low-vision users read the full `title`, which always states the current state in words (never colour alone).
-/// VoiceOver users hear a short `spokenLabel`, the state as a separate value, and a hint: the same way system switches read.
-/// Height grows with Dynamic Type; the text wraps instead of truncating.
-struct BigButton: View {
-    let title: String
-    let systemImage: String
-    var prominent = false
-    var spokenLabel: String?
-    var spokenValue: String?
-    var hint: String?
-    var isToggle = false
-    var compact = false          // half-width buttons: smaller type so one word is never hyphenated
-    let action: () -> Void
-
-    // Minimum heights. On the fixed main screen the buttons share whatever height is left, so they are usually taller.
-    @ScaledMetric(relativeTo: .title2) private var regularHeight: CGFloat = 56
-    @ScaledMetric(relativeTo: .title2) private var prominentHeight: CGFloat = 84
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(compact ? .headline.weight(.bold) : .title2.weight(.bold))
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, minHeight: prominent ? prominentHeight : regularHeight, maxHeight: .infinity)
-                .foregroundStyle(prominent ? Color.black : Color.white)
-                .contentShape(RoundedRectangle(cornerRadius: 18))
-                .surface(prominent: prominent)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(spokenLabel ?? title)
-        .accessibilityValue(spokenValue ?? "")
-        .accessibilityHint(hint ?? "")
-        .accessibilityAddTraits(isToggle ? .isToggle : [])
+        if model.onboarded { LiveVisionView() } else { OnboardingView() }
     }
 }
 
@@ -115,7 +14,11 @@ struct OnboardingView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 22) {
+                Image(systemName: "eye.circle.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
                 Text("Shared Sight").font(.largeTitle.bold())
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityFocused($titleFocused)
@@ -129,44 +32,53 @@ struct OnboardingView: View {
                 Text(model.tr(
                     "It tells you when it cannot see: if the camera is covered or it is too dark, you will hear it. With VoiceOver, a two-finger double tap anywhere pauses or resumes.",
                     "Ti avvisa quando non riesce a vedere: se la fotocamera è coperta o è troppo buio, lo sentirai. Con VoiceOver, un doppio tocco con due dita in qualsiasi punto mette in pausa o riprende."))
+                    .foregroundStyle(.white.opacity(0.75))
                 Picker(model.tr("Language", "Lingua"), selection: $model.language) {
                     Text("English").tag(SpeechLanguage.english)
                     Text("Italiano").tag(SpeechLanguage.italian)
                 }
                 .pickerStyle(.segmented)
-                BigButton(title: model.tr("I understand. Start.", "Ho capito. Avvia."), systemImage: "play.fill", prominent: true,
-                          hint: model.tr("Starts the camera. You will be asked to allow camera access.",
-                                         "Avvia la fotocamera. Ti verrà chiesto di consentire l'accesso alla fotocamera.")) {
+                PrimaryButton(title: model.tr("I understand. Start.", "Ho capito. Avvia."), systemImage: "play.fill",
+                              hint: model.tr("Starts the camera. You will be asked to allow camera access.",
+                                             "Avvia la fotocamera. Ti verrà chiesto di consentire l'accesso alla fotocamera.")) {
                     model.onboarded = true
                 }
             }
-            .font(.title3)
+            .font(.body)
             .padding(24)
         }
-        .background(Backdrop())
+        .background(Theme.background.ignoresSafeArea())
         .foregroundStyle(.white)
         .onAppear { titleFocused = true }
     }
 }
 
-struct MainView: View {
+// MARK: - Live Vision (main screen)
+
+/// The camera fills the screen; only what is needed to act sits on top of it.
+/// Hierarchy: Live Vision -> Target -> Settings. Diagnostics is separate, for engineers.
+struct LiveVisionView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var sheet: Sheet?
     @State private var askConsent = false
-    @State private var showSettings = false
-    @State private var showDiagnostics = false
+    @StateObject private var drone = DroneCompanionCoordinator()
+
+    enum Sheet: String, Identifiable {
+        case target, settings, diagnostics, drone
+        var id: String { rawValue }
+    }
 
     var body: some View {
-        // One fixed screen: every control stays in the same place, so it can be found by position and by habit.
-        // Only when the text is set so large that the controls cannot fit does the same column become scrollable.
-        ViewThatFits(in: .vertical) {
-            controls
-            ScrollView { controls }
+        Group {
+            if typeSize.isAccessibilitySize { stacked } else { layered }
         }
-        .background(Backdrop())
+        .background(Theme.background.ignoresSafeArea())
         .foregroundStyle(.white)
+        .tint(Theme.accent)
         // VoiceOver's Magic Tap (two-finger double tap) is the conventional "main action" gesture: here, silence or resume.
         .accessibilityAction(.magicTap) { model.togglePause() }
+        .onAppear { drone.attach(to: model) }
         .alert(model.tr("Share observations?", "Condividere le osservazioni?"), isPresented: $askConsent) {
             Button(model.tr("Share", "Condividi")) { model.setCollaboration(true) }
             Button(model.tr("Cancel", "Annulla"), role: .cancel) {}
@@ -175,180 +87,300 @@ struct MainView: View {
                 "Your phone will exchange obstacle observations with nearby Shared Sight devices that use session code \(model.sessionCode): object type, time and, when measured, position. No video, no photos, no face recognition. You can stop at any time.",
                 "Il telefono scambierà osservazioni sugli ostacoli con i dispositivi Shared Sight vicini che usano il codice sessione \(model.sessionCode): tipo di oggetto, orario e, se misurata, posizione. Nessun video, nessuna foto, nessun riconoscimento facciale. Puoi interrompere in qualsiasi momento."))
         }
-        .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
-        .sheet(isPresented: $showDiagnostics) { DiagnosticsView().environmentObject(model) }
-    }
-
-    private var controls: some View {
-            VStack(spacing: 12) {
-                status
-
-                BigButton(title: model.tr("What is around me?", "Cosa c'è intorno a me?"), systemImage: "eye.fill", prominent: true,
-                          hint: model.tr("Speaks what the camera sees now, what it saw a moment ago, and what another device reported.",
-                                         "Dice cosa vede ora la fotocamera, cosa ha visto poco fa e cosa ha segnalato un altro dispositivo.")) {
-                    model.describeSurroundings()
+        .sheet(item: $sheet) { which in
+            Group {
+                switch which {
+                case .target: TargetView()
+                case .settings: SettingsView()
+                case .diagnostics: DiagnosticsView()
+                case .drone: DroneCompanionSheet(coordinator: drone)
                 }
-
-                BigButton(title: model.paused ? model.tr("Paused. Resume perception.", "In pausa. Riprendi percezione.")
-                                              : model.tr("Pause perception", "Metti in pausa"),
-                          systemImage: model.paused ? "play.fill" : "pause.fill",
-                          spokenLabel: model.paused ? model.tr("Resume perception", "Riprendi percezione") : model.tr("Pause perception", "Metti in pausa"),
-                          hint: model.tr("Stops or restarts the camera and all announcements. A two-finger double tap does the same.",
-                                         "Ferma o riavvia la fotocamera e tutti gli annunci. Un doppio tocco con due dita fa lo stesso.")) {
-                    model.togglePause()
-                }
-
-                BigButton(title: model.tr("Repeat last announcement", "Ripeti l'ultimo annuncio"), systemImage: "arrow.counterclockwise") {
-                    model.repeatLastAnnouncement()
-                }
-
-                BigButton(title: model.audioOn ? model.tr("Speech is on. Turn off.", "Voce attiva. Disattiva.") : model.tr("Speech is off. Turn on.", "Voce disattivata. Attiva."),
-                          systemImage: model.audioOn ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                          spokenLabel: model.tr("Spoken alerts", "Avvisi vocali"),
-                          spokenValue: onOff(model.audioOn),
-                          hint: model.tr("When off, obstacle alerts are not spoken. Camera failures are still announced by VoiceOver.",
-                                         "Se disattivati, gli avvisi sugli ostacoli non vengono pronunciati. I guasti della fotocamera sono comunque annunciati da VoiceOver."),
-                          isToggle: true) { model.audioOn.toggle() }
-
-                BigButton(title: model.collaborationOn ? model.tr("Sharing is on. Stop sharing.", "Condivisione attiva. Interrompi.")
-                                                       : model.tr("Sharing is off. Turn on.", "Condivisione disattivata. Attiva."),
-                          systemImage: model.collaborationOn ? "person.2.fill" : "person.2.slash",
-                          spokenLabel: model.tr("Share with another device", "Condividi con un altro dispositivo"),
-                          spokenValue: onOff(model.collaborationOn),
-                          hint: model.tr("Exchanges obstacle observations with another phone. Never video. You will be asked to confirm.",
-                                         "Scambia osservazioni sugli ostacoli con un altro telefono. Mai video. Ti verrà chiesta conferma."),
-                          isToggle: true) {
-                    if model.collaborationOn { model.setCollaboration(false) } else { askConsent = true }
-                }
-
-                // Side by side at ordinary sizes, stacked when the text is large enough that two columns would wrap badly.
-                let secondary = Group {
-                    BigButton(title: model.tr("Settings", "Impostazioni"), systemImage: "gearshape", compact: !typeSize.isAccessibilitySize) { showSettings = true }
-                    BigButton(title: model.tr("Diagnostics", "Diagnostica"), systemImage: "waveform.path.ecg",
-                              hint: model.tr("Technical screen for engineers.", "Schermata tecnica per gli sviluppatori."),
-                              compact: !typeSize.isAccessibilitySize) { showDiagnostics = true }
-                }
-                if typeSize.isAccessibilitySize { VStack(spacing: 12) { secondary } } else { HStack(spacing: 12) { secondary } }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .glassGroup(spacing: 12)
+            .environmentObject(model)
+            .preferredColorScheme(.dark)
+            .tint(Theme.accent)
+        }
     }
 
-    /// Three separate, individually focusable lines. Each one states its meaning in words; the icon only repeats it.
-    private var status: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(model.perceptionStatusText, systemImage: perceptionIcon)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(perceptionOK ? Color.white : Color.yellow)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(model.tr("Camera", "Fotocamera"))
-                .accessibilityValue(model.perceptionStatusText)
-            Label(model.collaborationStatusText, systemImage: "person.2.wave.2")
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityElement(children: .combine)
+    /// Ordinary text sizes: full-screen camera, floating chrome.
+    private var layered: some View {
+        ZStack {
+            CameraStage().ignoresSafeArea()
+            VStack(spacing: 0) {
+                TopBar()
+                Spacer(minLength: 0)
+                ControlPanel(sheet: $sheet, askConsent: $askConsent)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// Accessibility text sizes: the camera keeps the top of the screen and the controls scroll below it,
+    /// so nothing is clipped and nothing covers the picture.
+    private var stacked: some View {
+        GeometryReader { geo in
+            VStack(spacing: 10) {
+                CameraStage()
+                    .frame(height: geo.size.height * 0.36)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+                ScrollView {
+                    VStack(spacing: 12) {
+                        TopBar()
+                        ControlPanel(sheet: $sheet, askConsent: $askConsent)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+}
+
+private struct TopBar: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        let state = model.paused ? ReliabilityState.unavailable : model.snapshot.reliability.status(.semanticDetection).state
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { title; Spacer(minLength: 8); chips(state) }
+            VStack(alignment: .leading, spacing: 8) { title; HStack(spacing: 8) { chips(state) } }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var title: some View {
+        Text("Shared Sight")
+            .font(.subheadline.weight(.semibold))
+            .shadow(color: .black.opacity(0.6), radius: 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    @ViewBuilder private func chips(_ state: ReliabilityState) -> some View {
+        StatusChip(text: cameraText(state), systemImage: cameraIcon(state),
+                   tint: state == .reliable ? Theme.accent : (state == .degraded ? Theme.caution : Theme.alert))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(model.tr("Camera", "Fotocamera"))
+            .accessibilityValue(model.paused ? model.tr("Perception paused.", "Percezione in pausa.") : model.perceptionStatusText)
+        StatusChip(text: model.trackingOn ? model.tr("Follow", "Segui") : model.tr("Awareness", "Vigilanza"),
+                   systemImage: model.trackingOn ? "scope" : "eye")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(model.tr("Mode", "Modalità"))
+            .accessibilityValue(model.trackingOn ? model.tr("Following a registered person", "Segue una persona registrata")
+                                                 : model.tr("Obstacle awareness only", "Solo rilevamento ostacoli"))
+        if model.collaborationOn {
+            StatusChip(text: "\(model.snapshot.peerCount)", systemImage: "person.2.wave.2",
+                       tint: model.snapshot.linkState == .connected ? Theme.accent : .white)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(model.tr("Other devices", "Altri dispositivi"))
                 .accessibilityValue(model.collaborationStatusText)
-            if !model.snapshot.lastSpoken.isEmpty {
-                Text(model.tr("Last announcement: ", "Ultimo annuncio: ") + model.snapshot.lastSpoken)
-                    .font(.body)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.updatesFrequently)
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .surface(interactive: false, cornerRadius: 22)
-        .layoutPriority(1)   // the status keeps its full height; the buttons absorb any shortage   // a read-only card: glass, but it does not react to touch
     }
 
-    private func onOff(_ on: Bool) -> String { on ? model.tr("On", "Attivo") : model.tr("Off", "Disattivato") }
+    private func cameraText(_ s: ReliabilityState) -> String {
+        if model.paused { return model.tr("Paused", "In pausa") }
+        switch s {
+        case .reliable: return model.tr("Live", "Attiva")
+        case .degraded: return model.tr("Degraded", "Ridotta")
+        case .unavailable: return model.tr("No vision", "Non vede")
+        }
+    }
 
-    private var perceptionOK: Bool { model.snapshot.reliability.status(.semanticDetection).state == .reliable && !model.paused }
-
-    private var perceptionIcon: String {
-        switch model.snapshot.reliability.status(.semanticDetection).state {
-        case .reliable: return "eye.fill"
-        case .degraded: return "eye.trianglebadge.exclamationmark"
+    private func cameraIcon(_ s: ReliabilityState) -> String {
+        switch s {
+        case .reliable: return "circle.fill"
+        case .degraded: return "exclamationmark.circle.fill"
         case .unavailable: return "eye.slash.fill"
         }
     }
 }
 
-struct SettingsView: View {
+/// Bottom panel: who is being followed, the simulated follow cue, one primary action, a row of small controls.
+private struct ControlPanel: View {
     @EnvironmentObject var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @FocusState private var codeFocused: Bool
+    @Binding var sheet: LiveVisionView.Sheet?
+    @Binding var askConsent: Bool
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Picker(model.tr("Language", "Lingua"), selection: $model.language) {
-                        Text("English").tag(SpeechLanguage.english)
-                        Text("Italiano").tag(SpeechLanguage.italian)
-                    }
-                    Picker(model.tr("Detail level", "Livello di dettaglio"), selection: $model.verbosity) {
-                        Text(model.tr("Minimal", "Minimo")).tag(Verbosity.minimal)
-                        Text(model.tr("Normal", "Normale")).tag(Verbosity.normal)
-                        Text(model.tr("Detailed", "Dettagliato")).tag(Verbosity.detailed)
-                    }
-                    VStack(alignment: .leading) {
-                        Text(model.tr("Speaking speed", "Velocità della voce"))
-                        Slider(value: $model.speechRate, in: 0.8...1.6, step: 0.1) {
-                            Text(model.tr("Speaking speed", "Velocità della voce"))
-                        } minimumValueLabel: {
-                            Image(systemName: "tortoise").accessibilityHidden(true)
-                        } maximumValueLabel: {
-                            Image(systemName: "hare").accessibilityHidden(true)
-                        }
-                        .accessibilityValue(String(format: "%d%%", Int((model.speechRate * 100).rounded())))
-                    }
-                    Button(model.tr("Test the voice", "Prova la voce")) { model.testVoice() }
-                    Toggle(model.tr("Vibration", "Vibrazione"), isOn: $model.haptics)
-                } header: {
-                    Text(model.tr("Speech", "Voce"))
-                } footer: {
-                    Text(model.tr(
-                        "While VoiceOver is on, Shared Sight speaks with your VoiceOver voice and speed instead of this setting. Vibration: a strong tap for an obstacle ahead, a lighter tap for one reported by another device, a distinct error buzz when the camera cannot see.",
-                        "Con VoiceOver attivo, Shared Sight parla con la voce e la velocità di VoiceOver invece di questa impostazione. Vibrazione: un colpo forte per un ostacolo davanti, uno più leggero per uno segnalato da un altro dispositivo, una vibrazione di errore distinta quando la fotocamera non vede."))
+        let p = model.targetPresentation
+        VStack(spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: p.symbol)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Theme.color(p.tone))
+                    .frame(width: 30)
+                    .contentTransition(.symbolEffect(.replace))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(p.title).font(.footnote.weight(.bold)).tracking(1.1).foregroundStyle(Theme.color(p.tone))
+                    Text(detail(p)).font(.subheadline).foregroundStyle(.white.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Section {
-                    Toggle(model.tr("Spatial mode", "Modalità spaziale"), isOn: $model.spatialMode)
-                        .disabled(!ARFrameProvider.isSupported)
-                    LabeledContent(model.tr("Session code", "Codice sessione")) {
-                        TextField(model.tr("Session code", "Codice sessione"), text: $model.sessionCode)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .focused($codeFocused)
-                            .accessibilityLabel(model.tr("Session code", "Codice sessione"))
-                            .accessibilityHint(model.tr("Both phones must use the same code.", "Entrambi i telefoni devono usare lo stesso codice."))
-                    }
-                    Stepper(value: $model.markerWidthCm, in: 5...60, step: 0.5) {
-                        Text(model.tr("Printed marker width: ", "Larghezza del marcatore stampato: ") + String(format: "%.1f cm", model.markerWidthCm))
-                    }
-                    .accessibilityLabel(model.tr("Printed marker width", "Larghezza del marcatore stampato"))
-                    .accessibilityValue(String(format: model.tr("%.1f centimeters", "%.1f centimetri"), model.markerWidthCm))
-                } header: {
-                    Text(model.tr("Collaboration", "Collaborazione"))
-                } footer: {
-                    Text(model.tr(
-                        "Spatial mode measures distances from the floor geometry and is required to locate another device's observations. Both phones must look once at the same printed marker; restart spatial mode after changing the marker width.",
-                        "La modalità spaziale misura le distanze dalla geometria del pavimento ed è necessaria per localizzare le osservazioni di un altro dispositivo. Entrambi i telefoni devono inquadrare una volta lo stesso marcatore stampato; riavvia la modalità spaziale dopo aver cambiato la larghezza del marcatore."))
+                Spacer(minLength: 0)
+                if model.snapshot.target.isLocked {
+                    Text("\(Int((model.snapshot.target.associationConfidence * 100).rounded()))%")
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                        .contentTransition(.numericText())
+                        .accessibilityLabel(model.tr("Tracking confidence", "Confidenza del tracciamento"))
                 }
             }
-            .navigationTitle(model.tr("Settings", "Impostazioni"))
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button(model.tr("Done", "Fine")) { dismiss() } }
-                // The number pad has no return key; without this a VoiceOver user cannot dismiss it.
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button(model.tr("Close keyboard", "Chiudi tastiera")) { codeFocused = false }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .animation(.easeInOut(duration: 0.2), value: p.title)
+
+            if model.trackingOn { FollowCue(guidance: model.snapshot.guidance) }
+
+            primary
+
+            HStack(spacing: 0) {
+                CircleButton(systemImage: model.audioOn ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                             label: model.tr("Spoken alerts", "Avvisi vocali"),
+                             value: model.audioOn ? model.tr("On", "Attivo") : model.tr("Off", "Disattivato"),
+                             hint: model.tr("When off, obstacle alerts are not spoken. Camera failures are still announced by VoiceOver.",
+                                            "Se disattivati, gli avvisi sugli ostacoli non vengono pronunciati. I guasti della fotocamera sono comunque annunciati da VoiceOver."),
+                             active: model.audioOn, isToggle: true) { model.audioOn.toggle() }
+                Spacer(minLength: 4)
+                CircleButton(systemImage: "person.crop.circle.badge.checkmark",
+                             label: model.tr("Target", "Bersaglio"),
+                             hint: model.tr("Register a person, show their marker, choose who to follow.",
+                                            "Registra una persona, mostra il suo marcatore, scegli chi seguire.")) { sheet = .target }
+                Spacer(minLength: 4)
+                CircleButton(systemImage: "eye.fill",
+                             label: model.tr("What is around me?", "Cosa c'è intorno a me?"),
+                             hint: model.tr("Speaks what the camera sees now, what it saw a moment ago, and what another device reported.",
+                                            "Dice cosa vede ora la fotocamera, cosa ha visto poco fa e cosa ha segnalato un altro dispositivo.")) {
+                    model.describeSurroundings()
                 }
+                Spacer(minLength: 4)
+                CircleButton(systemImage: model.paused ? "play.fill" : "pause.fill",
+                             label: model.paused ? model.tr("Resume perception", "Riprendi percezione") : model.tr("Pause perception", "Metti in pausa"),
+                             hint: model.tr("Stops or restarts the camera and all announcements. A two-finger double tap does the same.",
+                                            "Ferma o riavvia la fotocamera e tutti gli annunci. Un doppio tocco con due dita fa lo stesso."),
+                             active: model.paused) { model.togglePause() }
+                Spacer(minLength: 4)
+                Menu {
+                    Button { model.repeatLastAnnouncement() } label: {
+                        Label(model.tr("Repeat last announcement", "Ripeti l'ultimo annuncio"), systemImage: "arrow.counterclockwise")
+                    }
+                    Button {
+                        if model.collaborationOn { model.setCollaboration(false) } else { askConsent = true }
+                    } label: {
+                        Label(model.collaborationOn ? model.tr("Stop sharing with other devices", "Interrompi la condivisione")
+                                                    : model.tr("Share with another device", "Condividi con un altro dispositivo"),
+                              systemImage: model.collaborationOn ? "person.2.slash" : "person.2.fill")
+                    }
+                    Button { sheet = .drone } label: { Label("Drone Companion", systemImage: "airplane") }
+                    Divider()
+                    Button { sheet = .settings } label: { Label(model.tr("Settings", "Impostazioni"), systemImage: "gearshape") }
+                    Button { sheet = .diagnostics } label: { Label(model.tr("Diagnostics", "Diagnostica"), systemImage: "waveform.path.ecg") }
+                } label: {
+                    CircleIcon(systemImage: "ellipsis")
+                }
+                .accessibilityLabel(model.tr("More", "Altro"))
+                .accessibilityHint(model.tr("Repeat, sharing, settings, diagnostics.", "Ripeti, condivisione, impostazioni, diagnostica."))
             }
         }
+        .padding(16)
+        .glass()
+    }
+
+    private func detail(_ p: TargetPresentation) -> String {
+        guard model.activeProfile != nil else { return model.tr("Register a person to follow", "Registra una persona da seguire") }
+        if let name = model.activeProfile?.nickname, !name.isEmpty, model.snapshot.target.state == .unassigned {
+            return "\(name) · \(p.detail)"
+        }
+        return p.detail
+    }
+
+    @ViewBuilder private var primary: some View {
+        if model.activeProfile == nil {
+            PrimaryButton(title: model.tr("Register Person", "Registra persona"), systemImage: "person.badge.plus") { sheet = .target }
+        } else if model.trackingOn {
+            PrimaryButton(title: model.tr("Stop Tracking", "Ferma tracciamento"), systemImage: "stop.fill", kind: .quiet,
+                          hint: model.tr("Stops following. Obstacle alerts continue.", "Smette di seguire. Gli avvisi sugli ostacoli continuano.")) {
+                withAnimation(.easeInOut(duration: 0.25)) { model.stopTracking() }
+            }
+        } else {
+            PrimaryButton(title: model.tr("Start Tracking", "Avvia tracciamento"), systemImage: "scope",
+                          hint: model.tr("Looks for the registered person's marker and follows only that person.",
+                                         "Cerca il marcatore della persona registrata e segue solo quella persona.")) {
+                withAnimation(.easeInOut(duration: 0.25)) { model.startTracking() }
+            }
+            .disabled(model.paused)
+            .opacity(model.paused ? 0.5 : 1)
+        }
+    }
+}
+
+/// Suggested camera correction to keep the target centred. This is what a following drone would be asked
+/// to do; here it only tells the person holding the phone which way to turn. Always labelled as simulated.
+private struct FollowCue: View {
+    @EnvironmentObject var model: AppModel
+    let guidance: FollowGuidance
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                arrow("chevron.left", on: guidance.active && guidance.horizontal == .left)
+                Image(systemName: guidance.active && guidance.horizontal == .centered ? "circle.inset.filled" : "circle")
+                    .font(.footnote)
+                    .foregroundStyle(guidance.active && guidance.horizontal == .centered ? Theme.accent : .white.opacity(0.35))
+                arrow("chevron.right", on: guidance.active && guidance.horizontal == .right)
+            }
+            .accessibilityHidden(true)
+            Text(text).font(.subheadline.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Text(model.tr("SIMULATED", "SIMULATO"))
+                .font(.caption2.weight(.bold)).tracking(0.8)
+                .foregroundStyle(.white.opacity(0.55))
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: Theme.innerRadius, style: .continuous))
+        .animation(.easeInOut(duration: 0.18), value: guidance.horizontal)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.tr("Simulated drone follow guidance", "Guida di inseguimento del drone simulato"))
+        .accessibilityValue(text)
+    }
+
+    private func arrow(_ name: String, on: Bool) -> some View {
+        Image(systemName: name)
+            .font(.headline.weight(.bold))
+            .foregroundStyle(on ? Theme.accent : .white.opacity(0.25))
+            .scaleEffect(on ? 1.15 : 1)
+    }
+
+    private var text: String {
+        if let hold = guidance.hold {
+            switch hold {
+            case .notTracking: return model.tr("Not following", "Inseguimento non attivo")
+            case .searching: return model.tr("Waiting for target", "In attesa del bersaglio")
+            case .settling: return model.tr("Locking on", "Aggancio in corso")
+            case .predictedOnly: return model.tr("Paused · position is predicted", "In pausa · posizione prevista")
+            case .ambiguous: return model.tr("Paused · target uncertain", "In pausa · bersaglio incerto")
+            case .targetLost: return model.tr("Stopped · target lost", "Fermo · bersaglio perso")
+            case .lowConfidence: return model.tr("Paused · low confidence", "In pausa · confidenza bassa")
+            }
+        }
+        var parts: [String]
+        switch guidance.horizontal {
+        case .left: parts = [model.tr("Follow left", "Segui a sinistra")]
+        case .right: parts = [model.tr("Follow right", "Segui a destra")]
+        case .centered: parts = [model.tr("Aligned", "Allineato")]
+        }
+        switch guidance.vertical {
+        case .up: parts.append(model.tr("tilt up", "inclina in su"))
+        case .down: parts.append(model.tr("tilt down", "inclina in giù"))
+        case .centered: break
+        }
+        // Apparent size only. It is not a distance and is never worded as one.
+        switch guidance.size {
+        case .smaller: parts.append(model.tr("target looks smaller", "bersaglio più piccolo"))
+        case .larger: parts.append(model.tr("target looks larger", "bersaglio più grande"))
+        case .steady: break
+        }
+        return parts.joined(separator: " · ")
     }
 }

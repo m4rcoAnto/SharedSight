@@ -7,6 +7,7 @@ let package = Package(
     products: [.library(name: "SharedSightCore", targets: ["SharedSightCore"])],
     targets: [
         .target(name: "SharedSightCore"),
-        .testTarget(name: "SharedSightCoreTests", dependencies: ["SharedSightCore"]),
+        // Fixtures are recordings read from disk by path (BlindWalkTests); they are not bundle resources.
+        .testTarget(name: "SharedSightCoreTests", dependencies: ["SharedSightCore"], exclude: ["Fixtures"]),
     ]
 )

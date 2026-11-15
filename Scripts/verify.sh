@@ -3,6 +3,10 @@
 # Writes build/test logs next to the project so results can be inspected and reported honestly.
 cd "$(dirname "$0")/.." || exit 1
 mkdir -p Logs
+if command -v node >/dev/null && [ -d Server/node_modules ]; then
+  echo "== node --test (hub: fusion, shadow zones, prediction, HTTP, simulated demo) =="
+  ( cd Server && node --test 2>&1 ) | tee Logs/server-tests.log | grep -E "^# (tests|pass|fail)|^not ok"
+fi
 echo "== swift test (SharedSightCore, runs on the Mac, not on an iPhone) =="
 ( cd SharedSightCore && swift test 2>&1 ) | tee Logs/core-tests.log | tail -n 40
 echo "== xcodebuild (iOS Simulator, compile check only — NOT device validation) =="

@@ -5,3 +5,7 @@ DerivedData/
 xcuserdata/
 Logs/
 *.pt
+
+Server/node_modules/
+Server/.hub-token
+Server/recordings/

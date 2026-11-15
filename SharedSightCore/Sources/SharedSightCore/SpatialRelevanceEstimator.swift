@@ -53,13 +53,16 @@ public struct SpatialRelevanceEstimator: Sendable {
         return atan((x - 0.5) * 2 * tan(half)) * 180 / .pi
     }
 
+    /// Half-width in degrees of what is called "ahead" for a camera with this field of view.
+    public func aheadHalfAngle(horizontalFOVDeg: Double) -> Double { max(6, config.aheadFraction * max(horizontalFOVDeg / 2, 1)) }
+
     public func assess(_ entry: MemoryEntry, camera: CameraContext, distance: DistanceMeasurement? = nil) -> RelevanceAssessment {
         let t = entry.track
         let halfFOV = max(camera.horizontalFOVDeg / 2, 1)
         let b = bearing(forNormalizedX: t.box.cx, horizontalFOVDeg: camera.horizontalFOVDeg)
         var sector: Sector?
         if camera.orientationSupportsDirection {
-            let aheadLimit = max(6, config.aheadFraction * halfFOV)
+            let aheadLimit = aheadHalfAngle(horizontalFOVDeg: camera.horizontalFOVDeg)
             sector = abs(b) <= aheadLimit ? .ahead : (b < 0 ? .left : .right)
         }
         let motionAllowed = camera.steady && t.hits >= config.minHitsForMotion && t.observedThisFrame
