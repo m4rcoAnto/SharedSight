@@ -53,9 +53,19 @@ public struct AlertPhraseBuilder: Sendable {
         }
     }
 
+    /// Spoken alerts drop "about": every distance is already rounded, and the voice must stay short.
+    /// The on-request summary keeps the longer form.
+    func distance(_ d: DistanceMeasurement?, short: Bool) -> String? {
+        guard let full = distance(d) else { return nil }
+        guard short else { return full }
+        return full.replacingOccurrences(of: "a circa ", with: "").replacingOccurrences(of: "about ", with: "")
+    }
+
     func distance(_ d: DistanceMeasurement?) -> String? {
         guard let d else { return nil }
-        let rounded = max(0.5, (d.meters * 2).rounded() / 2)
+        // Half metres up close; whole metres from three metres on, where half a metre is below what is measured
+        // and "six point five" only makes the sentence longer.
+        let rounded = d.meters < 2.75 ? max(0.5, (d.meters * 2).rounded() / 2) : d.meters.rounded()
         let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
         switch language {
         case .english: return "about \(text) " + (rounded == 1 ? "meter" : "meters")
@@ -71,17 +81,90 @@ public struct AlertPhraseBuilder: Sendable {
             var parts: [String] = [count > 1 ? "\(count) \(noun(label, count: count))" : noun(label)]
             if let dir = direction(intent.sector) { parts[0] += " " + dir }
             else { parts[0] += language == .english ? " in view" : " nel campo visivo" }
-            if let dist = distance(intent.distance) { parts.append(dist) }
+            if let dist = distance(intent.distance, short: true) { parts.append(dist) }
             if moving { parts.append(language == .english ? "moving" : "in movimento") }
             return capitalised(parts.joined(separator: ", ")) + "."
         case let .peerObstacle(label):
             let head = language == .english ? "Obstacle reported by another device" : "Ostacolo segnalato da un altro dispositivo"
             var parts = [noun(label)]
             if let dir = direction(intent.sector) { parts.append(dir) }
-            if let dist = distance(intent.distance) { parts.append(dist) }
+            if let dist = distance(intent.distance, short: true) { parts.append(dist) }
             return head + ": " + parts.joined(separator: ", ") + "."
+        case let .hiddenSeenByOther(label, occluder):
+            // Heard in this order because a sentence may be cut off: what, which way, why it cannot be seen, how far,
+            // and last who says so. "Secondo" keeps the sentence free of grammatical gender.
+            // An object that is simply outside the picture needs no reason: "on your right" already is the reason.
+            var parts = [noun(label)]
+            if let dir = direction(intent.sector) { parts[0] += " " + dir }
+            if occluder != nil || intent.sector == nil { parts.append(place(occluder)) }
+            if let dist = distance(intent.distance, short: true) { parts.append(dist) }
+            return capitalised(parts.joined(separator: ", ")) + (language == .english ? ", from another phone." : ", da un altro telefono.")
+        case let .hiddenEstimate(label, _):
+            // Short on purpose: an estimate must not hold the voice for long. "Maybe" marks every part of it as a guess.
+            let head = capitalised(noun(label)) + (language == .english ? " no longer visible" : " non più visibile")
+            var parts: [String] = []
+            if let dir = direction(intent.sector) { parts.append(dir) }
+            if let dist = distance(intent.distance, short: true) { parts.append(dist) }
+            guard !parts.isEmpty else { return head + "." }
+            return head + (language == .english ? ", maybe " : ", forse ") + parts.joined(separator: ", ") + "."
+        case let .encounter(label, predicted, remote, hidden, imminent):
+            let vehicle = ["car", "truck", "bus", "motorcycle"].contains(label)
+            let name = vehicle ? (language == .italian ? "veicolo" : "vehicle") : noun(label)
+            // The most urgent sentence is the shortest one. Directions are those of the camera, like every other alert.
+            let dir: String
+            switch (language, intent.sector) {
+            case (.italian, .left?): dir = " da sinistra"
+            case (.italian, .right?): dir = " da destra"
+            case (.italian, .ahead?): dir = " davanti"
+            case (.italian, .behind?): dir = " da dietro"
+            case (.english, .left?): dir = " from the left"
+            case (.english, .right?): dir = " from the right"
+            case (.english, .ahead?): dir = " ahead"
+            case (.english, .behind?): dir = " from behind"
+            default: dir = ""
+            }
+            // "Not visible" already says the position is an estimate; a remote measurement says who measured it.
+            if language == .italian {
+                return (imminent ? "Attenzione, " : "Possibile ") + name + " in arrivo" + dir +
+                    (hidden || predicted ? ", non visibile." : (remote ? ", da un altro telefono." : "."))
+            }
+            return (imminent ? "Warning, " : "Possible ") + name + " approaching" + dir +
+                (hidden || predicted ? ", not visible." : (remote ? ", from another phone." : "."))
+        case let .localizationLost(label):
+            let vehicle = ["car", "truck", "bus", "motorcycle"].contains(label)
+            if language == .italian {
+                return "Non riesco più a localizzare " + (vehicle ? "il veicolo" : noun(label)) + ". Il rischio non è escluso."
+            }
+            return "I can no longer locate the " + (vehicle ? "vehicle" : noun(label)) + ". Risk is not ruled out."
+        case let .wallAhead(stop, roomSide):
+            // Only what was measured: the distance ahead and, at most, which side ray measured more room.
+            // Never an instruction ("go left") and never a statement that a side is clear, free or safe.
+            let en = language == .english
+            var text = (stop ? (en ? "Stop. " : "Fermati. ") : "") + (en ? "Wall ahead" : "Parete davanti")
+            if let dist = distance(intent.distance) { text += ", " + dist }
+            text += "."
+            switch roomSide {
+            case .left?: text += en ? " More room measured on the left." : " Più spazio misurato a sinistra."
+            case .right?: text += en ? " More room measured on the right." : " Più spazio misurato a destra."
+            default: break
+            }
+            return text
         case let .system(notice):
             return systemPhrase(notice)
+        }
+    }
+
+    /// Where a hidden object is with respect to the camera's view. Nil occluder = outside the field of view.
+    func place(_ occluder: OccluderKind?) -> String {
+        switch (language, occluder) {
+        case (.english, .wall?): return "behind a wall"
+        case (.english, .door?): return "behind a door"
+        case (.english, .object?): return "behind an object"
+        case (.english, nil): return "outside the camera's view"
+        case (.italian, .wall?): return "dietro una parete"
+        case (.italian, .door?): return "dietro una porta"
+        case (.italian, .object?): return "dietro un oggetto"
+        case (.italian, nil): return "fuori dal campo visivo"
         }
     }
 

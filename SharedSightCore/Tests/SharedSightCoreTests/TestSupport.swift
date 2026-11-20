@@ -63,3 +63,52 @@ func anchored(camera: Pose = .identity, worldFromAnchor: Pose = .identity, now: 
     LocalSpatialState(anchorID: "marker-01", worldFromAnchor: worldFromAnchor, anchorFixTime: now,
                       worldFromCamera: camera, trackingNormal: true)
 }
+
+/// The decision engine together with the app's real speech queue and a simulated voice (about 15 characters per
+/// second), wired exactly like AudioFeedbackEngine: cooldowns are committed only when speech really starts.
+/// Unit tests that check "said once" or "said again later" must run against this, not against the bare engine.
+final class SpokenAlerts {
+    let engine: ObstacleAlertDecisionEngine
+    private var queue = RevocableSpeechQueue()
+    private var current: (id: UUID, end: Double)?
+    private let builder = AlertPhraseBuilder(language: .italian)
+    init(config: AlertConfig = AlertConfig()) { engine = ObstacleAlertDecisionEngine(config: config) }
+    var config: AlertConfig { get { engine.config } set { engine.config = newValue } }
+    func reset() { engine.reset(); queue = RevocableSpeechQueue(); current = nil }
+
+    private func perform(_ actions: [SpeechQueueAction], at t: Double) {
+        for action in actions {
+            switch action {
+            case let .lifecycle(intent, phase): engine.delivery(intent, phase: phase, at: t)
+            case let .stop(id):
+                guard current?.id == id else { continue }
+                current = nil
+                perform(queue.didEnd(id, cancelled: true, now: t, validation: engine.validationSnapshot), at: t)
+            case let .speak(item):
+                current = (item.id, t + 0.25 + Double(item.text.count) / 15)
+                perform(queue.didStart(item.id, now: t, validation: engine.validationSnapshot), at: t)
+            }
+        }
+    }
+    private func advance(to now: Double) {
+        while let c = current, c.end <= now {
+            current = nil
+            perform(queue.didEnd(c.id, cancelled: false, now: c.end, validation: engine.validationSnapshot), at: c.end)
+        }
+    }
+
+    func decide(local: [LocalCandidate], peers: [ResolvedPeerObservation] = [], hidden: [HiddenReport] = [],
+                reliability: ReliabilityReport, events: [SystemNotice] = [],
+                preferences: AlertPreferences = AlertPreferences(), encounters: [EncounterResult] = [], epoch: String = "local",
+                now: Timestamp) -> [AlertIntent] {
+        advance(to: now)
+        let intents = engine.decide(local: local, peers: peers, hidden: hidden, reliability: reliability, events: events,
+                                    preferences: preferences, encounters: encounters, epoch: epoch, now: now)
+        perform(queue.revalidate(now: now, validation: engine.validationSnapshot), at: now)
+        for intent in intents {
+            perform(queue.submit(SpeechItem(text: builder.phrase(for: intent), intent: intent, now: now), now: now,
+                                 validation: engine.validationSnapshot), at: now)
+        }
+        return intents
+    }
+}

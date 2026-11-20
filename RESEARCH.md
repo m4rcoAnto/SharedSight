@@ -95,3 +95,51 @@ These three are Shared Sight's reason to exist, and they drive the interface dec
 | Low vision is far more common than blindness | Full Dynamic Type support (screen scrolls, buttons grow, columns stack), high contrast, Increase Contrast honoured, state always in words |
 | Silent failure is the dangerous failure | Camera and link failures are announced through VoiceOver even when the app's own speech is off |
 | Never imply safety | The on-demand summary of an empty scene ends with "This does not mean the way is clear" (unit-tested) |
+
+---
+
+# Shadow zones, fusion across phones, trajectory of hidden objects (checked 14 Nov 2026)
+
+Abstracts and, where noted, the full text were read through search summaries; verify a claim against the paper before
+quoting it.
+
+## Tracking through occlusion (TemporalObjectTracker)
+- **Occlusion-Aware SORT**, arXiv:2603.06034 (read in full): depth order from box bottom edges, an occlusion coefficient
+  per track, an occlusion-aware offset in the association cost and a bias-aware momentum for weak detections. Authors
+  note it only models short occlusions. → Adopted in simplified form: bottom-edge depth order, covered fraction as the
+  occlusion coefficient (no Gaussian map: it costs about 15 ms per frame in the paper), cost offset, momentum for
+  low-score matches, and a longer re-association window only while a nearer box explains the gap.
+- **Occlusion-Aware MOT via Expected Probability of Detection**, arXiv:2511.20239: the probability of detection must
+  depend on visibility; a miss while occluded should barely lower the belief that the object exists, a miss in plain
+  view should lower it strongly. → Adopted as a rule rather than a filter: hidden = keep and predict; in clear view
+  and undetected = evidence of absence (0.9 s grace, then dropped).
+
+## Where is something nobody sees? (GroundTrackMemory, Server/world.mjs)
+- **Schöller et al., What the Constant Velocity Model Can Teach Us About Pedestrian Motion Prediction**,
+  arXiv:1903.07933 (RA-L 2020): constant velocity matches or beats neural predictors for pedestrians. → The predictor is
+  constant velocity, damped (τ = 3 s) because a person who walks behind something often slows or stops, bounded by walls.
+- **Khurana et al., Detecting Invisible People**, ICCV 2021: occluded people are handled by forecasting, and a track
+  that lies in observed free space is not occluded. → Same split: estimate only where no camera can see.
+- **Galceran, Olson, Eustice, Augmented Vehicle Tracking under Occlusions**, ICRA 2015: the estimate of an occluded
+  object lives in the occluded part of the workspace. **Wyffels & Campbell, Negative Information for Occlusion
+  Reasoning**, IEEE T-RO 2015. → An estimate that drifts into a camera's clear view is moved to the nearest hidden
+  place it could have walked to, or dropped.
+- **Don't double it: Efficient Agent Prediction in Occlusions**, arXiv:2601.21504 and **Out-of-Sight Trajectories**,
+  arXiv:2509.15219: learned occupancy / trajectory prediction for hidden agents. → Not adopted: they need training data
+  and a road-scene prior; noted as the upgrade path if recordings from the app become available.
+
+## Many phones, one space (Server/world.mjs)
+- **A Unified 3D Object Perception Framework for Real-Time Outside-In Multi-Camera Systems**, arXiv:2601.10819, and
+  **EarlyBird**, arXiv:2310.13350: early (feature-level) fusion in bird's-eye view gives the best multi-camera tracking
+  but needs calibrated, synchronised video on one machine. → Not possible with phones that share only metadata.
+- **Fully distributed multi-view 3D tracking**, arXiv:2606.13127: each camera tracks in 3D on the ground plane and
+  fuses with Kalman filtering; a target hidden from one node stays alive through the others. → Same idea, centralised
+  on the hub: an object hidden from one phone stays OBSERVED while another measures it, and the hidden phone is told.
+- **UniKF, uncertainty-aware late fusion of BEV detections**, arXiv:2507.03381 (read in full): constant-velocity Kalman
+  filter, measurement covariance from each source, explicit handling of asynchronous sources. → Adopted: per-phone
+  measurement variance (sender sigma + alignment error), measurements applied at arrival time. Not adopted: rollback
+  for out-of-sequence data (phones send 10 times a second; a late frame is simply applied late).
+- **Collaborative Trajectory Prediction via Late Fusion**, arXiv:2604.22973 and **Towards Collaborative Joint
+  Perception and Prediction**, arXiv:2608.09541: object- and track-level fusion recovers occluded objects at a small
+  communication cost; fusing predictions costs far more bandwidth for little gain. → Tracks are fused, predictions are
+  made after fusion, never exchanged.

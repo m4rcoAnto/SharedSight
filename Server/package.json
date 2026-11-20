@@ -1,0 +1,23 @@
+{
+  "name": "sharedsight-hub",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --watch --watch-preserve-output server.mjs",
+    "start:fixed": "node server.mjs",
+    "replay": "node sim/replay.mjs",
+    "tunnel": "npx --yes cloudflared tunnel --no-autoupdate --url http://localhost:8080",
+    "test": "node --test",
+    "demo": "node demo.mjs",
+    "demo:1": "node demo.mjs --phones=1",
+    "demo:2": "node demo.mjs --phones=2",
+    "record": "node sim/record.mjs"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4",
+    "three": "0.180.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -39,9 +39,10 @@ public enum MemoryState: String, Codable, Sendable {
 /// Camera-relative sector. `behind` is only ever produced from validated 3D geometry (peer observations).
 public enum Sector: String, Codable, Sendable { case left, ahead, right, behind }
 
-/// A distance that was actually measured. Bounding-box size is never a source.
+/// A distance that was actually measured — or, when `method` says so, predicted. Bounding-box size is never a source.
 public struct DistanceMeasurement: Codable, Equatable, Sendable {
-    public enum Method: String, Codable, Sendable { case lidarDepth, groundPlaneRaycast, sharedAnchor }
+    /// `motionPrediction` is not a measurement of where the object is now: it is where the motion model puts it.
+    public enum Method: String, Codable, Sendable { case lidarDepth, groundPlaneRaycast, sharedAnchor, motionPrediction, surfaceRaycast }
     public var meters: Double
     public var sigma: Double
     public var method: Method

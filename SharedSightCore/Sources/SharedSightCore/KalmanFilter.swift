@@ -24,6 +24,17 @@ struct ScalarCVFilter: Sendable, Equatable {
         c11 = n11; c12 = n12
     }
 
+    /// Continuous white-noise-acceleration model: the result does not depend on how the interval is split into steps.
+    /// `density` is in (units)^2 / s^3. Used for metric ground-plane tracks (same model as the hub).
+    mutating func predict(dt: Double, density: Double) {
+        guard dt > 0 else { return }
+        p += v * dt
+        let n11 = c11 + dt * (2 * c12 + dt * c22) + density * dt * dt * dt / 3
+        let n12 = c12 + dt * c22 + density * dt * dt / 2
+        c22 += density * dt
+        c11 = n11; c12 = n12
+    }
+
     mutating func update(z: Double, r: Double) {
         let s = c11 + r
         guard s > 0 else { return }

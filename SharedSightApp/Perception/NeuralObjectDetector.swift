@@ -67,22 +67,29 @@ final class NeuralObjectDetector {
         throw DetectorError.modelMissing
     }
 
-    func detect(_ frame: CameraFrame) throws -> Output {
+    /// `decodeMasks == false` skips copying the mask prototypes (about 800 000 values) when nobody will draw them.
+    /// The mask channel count is still read from the tensor shape: the box tensor's layout depends on it.
+    func detect(_ frame: CameraFrame, decodeMasks: Bool = true) throws -> Output {
         guard let request else { throw DetectorError.modelMissing }
         let start = CACurrentMediaTime()
         try VNImageRequestHandler(cvPixelBuffer: frame.pixelBuffer, orientation: frame.orientation, options: [:]).perform([request])
         guard let results = request.results as? [VNCoreMLFeatureValueObservation] else {
             throw DetectorError.unexpectedOutputs("no feature values")
         }
-        var boxes: RawTensor?, prototypes: RawTensor?
+        var boxes: RawTensor?, prototypes: RawTensor?, maskChannels = 0
         for r in results {
             guard let array = r.featureValue.multiArrayValue else { continue }
-            let t = RawTensor(shape: array.shape.map(\.intValue), data: MLShapedArray<Float>(converting: array).scalars)
-            if t.shape.count == 4 { prototypes = t } else if t.shape.count == 3 { boxes = t }
+            let shape = array.shape.map(\.intValue)
+            if shape.count == 4 {
+                maskChannels = shape[1]
+                if decodeMasks { prototypes = RawTensor(shape: shape, data: MLShapedArray<Float>(converting: array).scalars) }
+            } else if shape.count == 3 {
+                boxes = RawTensor(shape: shape, data: MLShapedArray<Float>(converting: array).scalars)
+            }
         }
         guard let boxes else { throw DetectorError.unexpectedOutputs(results.map { $0.featureName }.joined(separator: ",")) }
         let letterbox = Letterbox(imageWidth: frame.uprightSize.width, imageHeight: frame.uprightSize.height)
-        let decoded = try YOLODecoder.decode(output: boxes, maskChannels: prototypes?.shape[1] ?? 0, inputSize: inputSize,
+        let decoded = try YOLODecoder.decode(output: boxes, maskChannels: maskChannels, inputSize: inputSize,
                                              letterbox: letterbox, confidenceThreshold: confidenceThreshold)
         var detections: [Detection] = [], byID: [UUID: DecodedDetection] = [:]
         for d in decoded {
@@ -113,6 +120,8 @@ final class ObstacleSegmentationEngine {
     private(set) var lastLatency = 0.0
     private var frameIndex = 0
     private var cache: [Int: TrackMask] = [:]
+    /// Whether the next call to `update` will compute masks (so the detector knows whether to decode prototypes).
+    var runsNextFrame: Bool { (frameIndex + 1) % everyNthFrame == 0 }
 
     func update(tracks: [TrackSnapshot], priority: [Int: Double], output: NeuralObjectDetector.Output, now: Timestamp) -> [Int: TrackMask] {
         frameIndex += 1

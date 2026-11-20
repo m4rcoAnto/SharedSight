@@ -16,10 +16,104 @@ final class AppModel: ObservableObject {
     @Published var verbosity: Verbosity { didSet { defaults.set(verbosity.rawValue, forKey: "verbosity"); pushPreferences() } }
     /// Multiplier on the system default speech rate (0.8 ... 1.6). VoiceOver users get their own VoiceOver rate instead.
     @Published var speechRate: Double { didSet { defaults.set(speechRate, forKey: "speechRate"); engine.audio.rateMultiplier = Float(speechRate) } }
-    @Published var spatialMode = false { didSet { engine.setSpatialMode(spatialMode) } }
+    // Remembered between launches: a blind user should not have to type a 32-character key every morning.
+    @Published var serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? "http://192.168.1.10:8080"
+    @Published var serverToken = UserDefaults.standard.string(forKey: "serverToken") ?? ""
+    @Published var serverPreviews = UserDefaults.standard.object(forKey: "serverPreviews") as? Bool ?? true
+    @Published private(set) var serverOn = false
+    func toggleServer() {
+        serverOn.toggle()
+        if serverOn && ARFrameProvider.isSupported { spatialMode = true }
+        serverURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        serverToken = serverToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaults.set(serverURL, forKey: "serverURL")
+        defaults.set(serverToken, forKey: "serverToken")
+        defaults.set(serverPreviews, forKey: "serverPreviews")
+        defaults.set(serverOn, forKey: "serverOn")      // reconnects by itself at the next launch
+        engine.configureServer(url: serverOn ? serverURL : nil, token: serverToken,
+                               session: sessionCode, previews: serverPreviews)
+    }
+
+    // MARK: Hub QR code
+
+    /// True while the camera frames the app already receives are being searched for the hub's QR code.
+    @Published private(set) var hubScanning = false
+    private var hubConnectionPending = false
+
+    func startHubScan() {
+        guard !serverOn, !hubScanning else { return }
+        guard !paused else {
+            answer(tr("Perception is paused. Resume it to scan the hub code.", "La percezione è in pausa. Riprendila per leggere il codice dell'hub."))
+            return
+        }
+        hubScanning = true
+        updatePreviewMode()
+        engine.onHubLink = { [weak self] link in self?.hubLinkScanned(link) }
+        engine.setHubScan(true)
+        // After the sheet has appeared, so VoiceOver's own screen-change speech does not swallow it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.hubScanning else { return }
+            self.answer(self.tr("Point the camera at the QR code on the hub screen.", "Inquadra il codice QR sullo schermo dell'hub."))
+        }
+    }
+
+    func cancelHubScan() {
+        guard hubScanning else { return }
+        hubScanning = false
+        engine.setHubScan(false)
+        updatePreviewMode()
+    }
+
+    private func hubLinkScanned(_ link: HubLink) {
+        guard hubScanning, !serverOn else { return }
+        hubScanning = false
+        updatePreviewMode()
+        serverURL = link.url
+        serverToken = link.token
+        if let session = link.session { sessionCode = session }
+        hubConnectionPending = true
+        toggleServer()
+        if haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.hubConnectionPending else { return }
+            self.answer(self.tr("Hub code read. Connecting to the hub.", "Codice dell'hub letto. Connessione all'hub in corso."))
+        }
+    }
+
+    /// After a scan: says "connected" only once the hub has really answered, and says so when it has not.
+    private func announceHubConnection(_ status: String) {
+        guard hubConnectionPending else { return }
+        guard serverOn else { hubConnectionPending = false; return }
+        if status == "Connesso" {
+            hubConnectionPending = false
+            answer(tr("Connected to the hub.", "Connesso all'hub."))
+        } else if status != "In connessione…" && status != "Disconnesso" && !status.hasPrefix("Connessione instabile") {
+            hubConnectionPending = false
+            answer(tr("Could not connect to the hub. Check the hub and the Wi-Fi network.",
+                      "Impossibile connettersi all'hub. Controlla l'hub e la rete Wi-Fi."))
+        }
+    }
+
+    /// ARKit world tracking: distances, positions on the floor, hidden-object estimates and encounter risk all need it.
+    /// On by default wherever it is supported; the choice is remembered.
+    @Published var spatialMode: Bool {
+        didSet { defaults.set(spatialMode, forKey: "spatialMode"); engine.setSpatialMode(spatialMode); updatePreviewMode() }
+    }
     @Published var sessionCode: String { didSet { defaults.set(sessionCode, forKey: "sessionCode") } }
     @Published var markerWidthCm: Double { didSet { defaults.set(markerWidthCm, forKey: "markerWidthCm") } }
-    @Published var diagnosticsVisible = false { didSet { engine.previewEnabled = diagnosticsVisible } }
+    @Published var diagnosticsVisible = false { didSet { updatePreviewMode() } }
+    @Published var showOutlines: Bool { didSet { defaults.set(showOutlines, forKey: "showOutlines"); updatePreviewMode() } }
+    /// How long target-tracking events are kept on this phone (diagnostics only).
+    @Published var eventRetentionDays: Double {
+        didSet { defaults.set(eventRetentionDays, forKey: "eventRetentionDays"); eventLog.policy.maxAgeDays = eventRetentionDays; eventLog.flush() }
+    }
+
+    // Registered people (persistent) and the live target (per session)
+    @Published private(set) var profiles: [PersonProfile] = []
+    @Published private(set) var activeProfileID: UUID?
+    @Published private(set) var trackingOn = false          // never persisted: following is started explicitly each session
+    @Published private(set) var storeError: String?
+    @Published private(set) var trackingEvents: [TrackingEvent] = []
 
     let engine = SharedSightPerceptionEngine()
     private let defaults = UserDefaults.standard
@@ -27,10 +121,14 @@ final class AppModel: ObservableObject {
     private var pausedByBackground = false
     private var lastSemanticState: ReliabilityState?
     private var lastLinkState: PeerLinkState?
+    private var lastTargetState: TargetTrackingState = .unassigned
+    private var registry: PersonRegistry?
+    private let eventLog: TrackingEventLog
 
     init() {
         let d = UserDefaults.standard
         onboarded = d.bool(forKey: "onboarded")
+        spatialMode = (d.object(forKey: "spatialMode") as? Bool ?? true) && ARFrameProvider.isSupported
         audioOn = d.object(forKey: "audioOn") as? Bool ?? true
         haptics = d.object(forKey: "haptics") as? Bool ?? true
         let preferredItalian = Locale.preferredLanguages.first?.hasPrefix("it") ?? false
@@ -41,6 +139,24 @@ final class AppModel: ObservableObject {
         sessionCode = d.string(forKey: "sessionCode") ?? "1234"
         let width = d.double(forKey: "markerWidthCm")
         markerWidthCm = width > 0 ? width : 15
+        showOutlines = d.object(forKey: "showOutlines") as? Bool ?? false
+        let days = d.double(forKey: "eventRetentionDays")
+        eventRetentionDays = days > 0 ? days : 7
+
+        // Local-only storage in the app's private container (Application Support), encrypted while the phone is locked.
+        let folder = (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                      ?? FileManager.default.temporaryDirectory).appendingPathComponent("SharedSight", isDirectory: true)
+        eventLog = TrackingEventLog(persistence: FilePersistence(url: folder.appendingPathComponent("tracking-events.json")),
+                                    policy: RetentionPolicy(maxAgeDays: days > 0 ? days : 7))
+        do {
+            registry = try PersonRegistry(persistence: FilePersistence(url: folder.appendingPathComponent("people.json")))
+        } catch {
+            // Never start from an empty registry over an unreadable file: that would overwrite the user's people.
+            registry = nil
+            storeError = String(describing: error)
+        }
+        syncProfiles()
+        trackingEvents = eventLog.events
         if onboarded { begin() }
     }
 
@@ -56,8 +172,13 @@ final class AppModel: ObservableObject {
         engine.audio.rateMultiplier = Float(speechRate)
         pushPreferences()
         engine.onSnapshot = { [weak self] s in self?.receive(s) }
+        engine.onTargetEvents = { [weak self] events in self?.log(events) }
+        engine.setTargetProfile(activeProfile)
+        engine.setSpatialMode(spatialMode)      // didSet does not run for the value restored in init
+        updatePreviewMode()
         engine.start()
         UIApplication.shared.isIdleTimerDisabled = true
+        if defaults.bool(forKey: "serverOn"), !serverToken.isEmpty, !serverOn { toggleServer() }
     }
 
     private func pushPreferences() {
@@ -68,6 +189,7 @@ final class AppModel: ObservableObject {
 
     private func receive(_ s: Snapshot) {
         snapshot = s
+        announceHubConnection(s.serverStatus)
         // When speech is muted, VoiceOver users still get perception state changes.
         let state = s.reliability.status(.semanticDetection).state
         if state != lastSemanticState, lastSemanticState != nil, !audioOn, UIAccessibility.isVoiceOverRunning {
@@ -79,6 +201,126 @@ final class AppModel: ObservableObject {
             UIAccessibility.post(notification: .announcement, argument: collaborationStatusText)
         }
         lastLinkState = s.linkState
+        announceTargetChange(s)
+    }
+
+    // MARK: Registered people
+
+    var activeProfile: PersonProfile? { profiles.first { $0.id == activeProfileID } }
+
+    var targetPresentation: TargetPresentation {
+        TargetPresentation.make(snapshot.target, guidance: snapshot.guidance, language: language)
+    }
+
+    private func syncProfiles() {
+        profiles = registry?.profiles ?? []
+        activeProfileID = registry?.activeProfileID
+    }
+
+    /// Runs a registry change, republishes the list and tells the engine who the target is now.
+    private func mutate(_ change: (PersonRegistry) throws -> Void) {
+        guard let registry else { return }
+        do { try change(registry); storeError = nil } catch { storeError = String(describing: error) }
+        syncProfiles()
+        if activeProfile == nil, trackingOn { stopTracking() }
+        engine.setTargetProfile(activeProfile)
+    }
+
+    func createProfile(nickname: String) {
+        mutate { registry in
+            let created = try registry.create(nickname: nickname)
+            try registry.select(id: created.id)
+        }
+    }
+
+    func renameProfile(_ id: UUID, nickname: String) {
+        mutate { try $0.update(id: id) { $0.nickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines) } }
+    }
+
+    func selectProfile(_ id: UUID) { mutate { try $0.select(id: id) } }
+
+    /// New random token: every marker printed or shared before stops matching.
+    func regenerateMarker(_ id: UUID) { mutate { try $0.regenerateMarker(id: id) } }
+
+    func setOcclusionGrace(_ seconds: Double) {
+        guard let id = activeProfileID else { return }
+        mutate { try $0.update(id: id) { $0.preferences.occlusionGraceSeconds = seconds } }
+    }
+
+    /// Deletes the profile and everything stored about that person: tracking events and the live association.
+    func deleteProfile(_ id: UUID) {
+        mutate { registry in
+            let removed = try registry.delete(id: id)
+            eventLog.purge(userID: removed.userID)
+            eventLog.flush()
+        }
+        trackingEvents = eventLog.events
+    }
+
+    func clearTrackingEvents() {
+        eventLog.clear()
+        eventLog.flush()
+        trackingEvents = []
+    }
+
+    // MARK: Target following
+
+    func startTracking() {
+        guard activeProfile != nil, !paused else { return }
+        trackingOn = true
+        engine.setTracking(true)
+    }
+
+    func stopTracking() {
+        trackingOn = false
+        engine.setTracking(false)
+        if UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: tr("Tracking stopped.", "Tracciamento fermato."))
+        }
+    }
+
+    /// The operator points at a detected person: "this is the registered person". Starts tracking if needed.
+    func selectTarget(trackID: Int) {
+        guard activeProfile != nil, !paused else { return }
+        if !trackingOn { startTracking() }
+        engine.selectTarget(trackID: trackID)
+    }
+
+    private func log(_ events: [TargetEvent]) {
+        let now = Date()
+        for e in events {
+            eventLog.append(TrackingEvent(date: now, kind: e.kind, userID: e.userID, trackID: e.trackID, detail: e.detail))
+        }
+        eventLog.flush()            // state changes are rare (a few per minute), so writing each batch is cheap
+        trackingEvents = eventLog.events
+    }
+
+    /// Speech + haptic + VoiceOver for target state changes. Lost and uncertain are never silent.
+    private func announceTargetChange(_ s: Snapshot) {
+        let state = s.target.state
+        guard state != lastTargetState else { return }
+        lastTargetState = state
+        guard trackingOn, activeProfile?.preferences.announceStateChanges ?? true,
+              let text = targetPresentation.announcement else { return }
+        let haptic: UINotificationFeedbackGenerator.FeedbackType?
+        switch state {
+        case .acquired: haptic = .success
+        case .lost: haptic = .error
+        case .ambiguous, .temporarilyOccluded: haptic = .warning
+        default: haptic = nil
+        }
+        if UIAccessibility.isVoiceOverRunning {
+            engine.audio.sayStatus("", haptic: haptic)                 // haptic only; VoiceOver speaks
+            UIAccessibility.post(notification: .announcement, argument: text)
+        } else {
+            engine.audio.sayStatus(text, haptic: haptic)
+        }
+    }
+
+    private func updatePreviewMode() {
+        // ARKit mode has no preview layer: frames from the engine. The QR scanner shows the same frames.
+        engine.previewEnabled = diagnosticsVisible || spatialMode || hubScanning
+        engine.masksWanted = diagnosticsVisible || showOutlines
     }
 
     // MARK: Things the user asks for directly
@@ -104,13 +346,14 @@ final class AppModel: ObservableObject {
         }
         let state: ReliabilityState = paused ? .unavailable : snapshot.reliability.status(.semanticDetection).state
         if paused { return tr("Perception is paused. I cannot tell what is around you.", "La percezione è in pausa. Non posso dirti cosa c'è intorno a te.") }
-        return AlertPhraseBuilder(language: language).surroundings(perception: state, local: local, peers: peers)
+        return AlertPhraseBuilder(language: language).surroundings(perception: state, local: local, peers: peers,
+                                                                   hidden: snapshot.hidden)
     }
 
     func describeSurroundings() { answer(surroundingsText) }
 
     func repeatLastAnnouncement() {
-        answer(snapshot.lastSpoken.isEmpty ? tr("Nothing has been announced yet.", "Nessun annuncio finora.") : snapshot.lastSpoken)
+        engine.audio.repeatLastAnnouncement()
     }
 
     func testVoice() {
@@ -119,6 +362,7 @@ final class AppModel: ObservableObject {
 
     func togglePause() {
         paused.toggle()
+        if paused, trackingOn { stopTracking() }     // a paused camera cannot follow anyone
         engine.setPaused(paused)
         // Confirm the change when the app's own voice is off, so a Magic Tap is never left unanswered.
         if !audioOn, UIAccessibility.isVoiceOverRunning {
